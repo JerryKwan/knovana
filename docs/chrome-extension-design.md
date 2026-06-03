@@ -2,6 +2,30 @@
 
 ---
 
+## 0. 阶段边界
+
+当前实现处于 **阶段一：侧边栏优先**。
+
+阶段一已经覆盖：
+
+- WXT + Svelte + TypeScript 的 Chrome MV3 基础工程。
+- Background Service Worker，负责右键菜单、快捷键、Side Panel 打开、当前页面上下文采集和内部消息路由。
+- Side Panel，包含对话、知识库、搜索和捕获预览。
+- Options 页面，包含后端地址、访问令牌、主题和自动打开侧栏设置。
+- `marked` + `DOMPurify` 的 Markdown 渲染，保证 AI 输出和知识库内容先解析再清洗。
+
+阶段二再增加：
+
+- Content Script。
+- 页面内浮动面板。
+- Shadow DOM 样式隔离。
+- 浮动面板位置和展开状态持久化。
+- 更完整的 Svelte stores 与会话管理。
+
+因此，下文凡涉及 Content Script、浮动面板、Shadow DOM 和 stores 的内容，除非明确标注为当前实现，均属于阶段二规划。
+
+---
+
 ## 1. 开发框架
 
 ### 1.1 WXT + Svelte
@@ -14,6 +38,38 @@
 | **Tailwind CSS** | 原子化样式，适合 Side Panel 窄空间 |
 
 ### 1.2 项目结构
+
+阶段一当前结构：
+
+```
+chrome-extension/
+├── wxt.config.ts                 # WXT + manifest 配置
+├── package.json                  # 前端脚本与质量验证命令
+├── tsconfig.json
+├── vitest.config.ts
+├── eslint.config.js
+├── prettier.config.js
+├── svelte.config.js
+│
+├── src/
+│   ├── entrypoints/
+│   │   ├── background.ts         # Service Worker
+│   │   ├── sidepanel/            # Side Panel
+│   │   └── options/              # 设置页面
+│   ├── components/
+│   │   ├── capture/
+│   │   ├── chat/
+│   │   ├── common/
+│   │   └── knowledge/
+│   ├── services/                 # API、SSE、capture、storage、messaging、theme
+│   ├── styles/
+│   ├── test/
+│   └── types/
+│
+└── public/icon/
+```
+
+阶段二目标结构会在当前结构上增加 `content.ts`、`components/floating/`、`stores/` 和浮动面板相关样式：
 
 ```
 chrome-extension/
@@ -91,7 +147,9 @@ chrome-extension/
 
 ## 2. 三层架构与通信
 
-Chrome 扩展的三个执行环境彼此隔离，通过消息通信：
+阶段一当前只启用 **Service Worker + Side Panel / Options**。页面上下文由 Service Worker 在需要时通过 `chrome.scripting.executeScript` 采集，Side Panel 通过 `chrome.runtime.sendMessage` 与 Service Worker 通信。
+
+阶段二加入 Content Script 后，Chrome 扩展的三个执行环境彼此隔离，通过消息通信：
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -242,9 +300,9 @@ export default defineBackground(() => {
 
 ---
 
-## 4. Content Script（content.ts）
+## 4. Content Script（content.ts，阶段二）
 
-Content Script 承担两个职责：**页面信息提取** 和 **浮动面板渲染**。
+Content Script 属于阶段二。它将承担两个职责：**页面信息提取** 和 **浮动面板渲染**。
 
 ### 4.1 页面信息提取
 
@@ -363,9 +421,9 @@ export default defineContentScript({
 
 ---
 
-## 5. Side Panel（侧边栏 — 完整交互）
+## 5. Side Panel（侧边栏，阶段一）
 
-Side Panel 是完整的 Svelte 应用，包含三个主要视图。
+Side Panel 是阶段一的主要用户界面。当前包含三个主要视图：对话、知识库和搜索，并在对话区上方承载右键/快捷键触发的捕获预览。
 
 ### 5.1 布局结构
 
@@ -395,17 +453,20 @@ Side Panel 是完整的 Svelte 应用，包含三个主要视图。
 ### 5.2 Chat View
 
 - 对话消息列表，支持 Markdown 渲染
+- Markdown 使用 `marked` 解析、`DOMPurify` 清洗，避免直接渲染不可信 HTML
 - AI 回复使用 SSE 流式渲染
-- 每条 AI 消息下方有操作按钮：复制、保存到知识库、重新生成
+- 每条 AI 消息下方有操作按钮：复制
+- 保存到知识库、重新生成和会话历史属于后续增强
 - 空状态显示上下文感知的建议操作（基于当前页面）
-- 会话历史列表（侧边抽屉或下拉）
+- 会话历史列表（侧边抽屉或下拉）属于后续增强
 
 ### 5.3 Knowledge View
 
 - 知识条目卡片列表（标题、来源、标签、摘要）
-- 支持按标签筛选
+- 支持刷新、详情展开、来源跳转和删除
+- 按标签筛选属于后续增强
 - 点击展开详情（Markdown 渲染）
-- 支持编辑、删除
+- 编辑属于后续增强
 
 ### 5.4 Search View
 
@@ -449,7 +510,7 @@ Side Panel 是完整的 Svelte 应用，包含三个主要视图。
 
 ## 7. 状态管理
 
-使用 Svelte 内置的 `writable` / `derived` Store：
+阶段一先使用组件局部状态承载 Side Panel 当前交互，避免在功能边界还未稳定时过早抽象。阶段二在加入浮动面板、会话历史和跨页面状态后，再使用 Svelte 内置的 `writable` / `derived` Store：
 
 ```typescript
 // stores/chat.ts
@@ -505,7 +566,9 @@ export const currentPageInfo = writable<PageMetadata | null>(null);
 
 ## 8. API 通信
 
-Side Panel / 浮动面板不直接请求后端，而是通过 Service Worker 代理：
+阶段一当前由 Side Panel 通过 Service Worker 代理对话、捕获、知识库和搜索请求；Options 页面直接测试后端连接。阶段二引入浮动面板后，应统一 API 客户端、错误格式、超时/取消和认证头处理。
+
+目标 API 通信方式：
 
 ```typescript
 // services/api.ts
