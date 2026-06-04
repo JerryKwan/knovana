@@ -9,8 +9,20 @@ export default defineConfig({
     short_name: 'Knovana',
     description: 'Capture, organize, and query knowledge from the browser.',
     version: '0.1.0',
+    icons: {
+      16: 'icon/16.png',
+      32: 'icon/32.png',
+      48: 'icon/48.png',
+      96: 'icon/96.png',
+      128: 'icon/128.png',
+    },
     action: {
       default_title: 'Open Knovana',
+      default_icon: {
+        16: 'icon/16.png',
+        32: 'icon/32.png',
+        48: 'icon/48.png',
+      },
     },
     permissions: ['sidePanel', 'contextMenus', 'activeTab', 'scripting', 'storage', 'tabs'],
     host_permissions: ['http://localhost:*/*', 'http://127.0.0.1:*/*', 'https://api.knovana.com/*'],

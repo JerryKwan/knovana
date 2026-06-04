@@ -1,11 +1,13 @@
 <script lang="ts">
-  import { BookOpen, Brain, MessageCircle, Search, Settings } from '@lucide/svelte';
+  import { BookOpen, MessageCircle, Search, Settings } from '@lucide/svelte';
   import { onMount } from 'svelte';
   import CapturePreview from '../../components/capture/CapturePreview.svelte';
   import ChatView from '../../components/chat/ChatView.svelte';
   import InputBar from '../../components/chat/InputBar.svelte';
+  import BrandMark from '../../components/common/BrandMark.svelte';
   import KnowledgeView from '../../components/knowledge/KnowledgeView.svelte';
   import SearchView from '../../components/knowledge/SearchView.svelte';
+  import SettingsPanel from '../../components/settings/SettingsPanel.svelte';
   import { buildCaptureRequest } from '../../services/capture';
   import { sendRuntimeMessage } from '../../services/messaging';
   import { getSettings } from '../../services/storage';
@@ -14,6 +16,7 @@
   import type { ChatMessage } from '../../types/chat';
   import type { PageSnapshot, PendingAction } from '../../types/capture';
   import type { RuntimeMessage } from '../../types/message';
+  import type { ExtensionSettings } from '../../types/settings';
 
   type Tab = 'chat' | 'knowledge' | 'search';
 
@@ -30,6 +33,7 @@
   let chatRequestId = '';
   let activeAssistantId = '';
   let hasToken = false;
+  let settingsOpen = false;
 
   const tabs: Array<{ id: Tab; label: string; icon: typeof MessageCircle }> = [
     { id: 'chat', label: '对话', icon: MessageCircle },
@@ -211,89 +215,223 @@
     captureRunning = false;
   }
 
-  function openOptions() {
-    void sendRuntimeMessage({ type: 'OPEN_OPTIONS' });
+  function openSettings() {
+    settingsOpen = true;
+  }
+
+  function closeSettings() {
+    settingsOpen = false;
+  }
+
+  function handleSettingsSaved(next: ExtensionSettings) {
+    hasToken = Boolean(next.token);
+    applyThemePreference(next.theme);
   }
 </script>
 
 <main
-  class="grid h-screen min-h-0 grid-rows-[auto_auto_1fr_auto] overflow-hidden bg-[color:var(--kn-bg)] text-[color:var(--kn-text)]"
+  class="grid h-screen min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden bg-[color:var(--kn-bg)] text-[color:var(--kn-text)]"
 >
-  <header class="border-b border-[color:var(--kn-border)] bg-[color:var(--kn-bg-raised)] px-3 py-3">
-    <div class="flex items-center justify-between gap-3">
-      <div class="flex min-w-0 items-center gap-2">
-        <div
-          class="grid h-9 w-9 place-items-center rounded-[8px] bg-[color:var(--kn-primary)] text-[color:var(--kn-primary-ink)] shadow-soft"
-        >
-          <Brain size={19} />
+  <header class="panel-header">
+    <div class="flex min-w-0 items-center gap-3">
+      <BrandMark size={38} />
+      <div class="min-w-0">
+        <div class="flex items-center gap-2">
+          <h1 class="truncate text-[16px] font-extrabold leading-5">Knovana</h1>
+          <span class={`connection-dot ${hasToken ? 'ready' : 'setup'}`}></span>
         </div>
-        <div class="min-w-0">
-          <h1 class="truncate text-[16px] font-bold tracking-normal">Knovana</h1>
-          <p class="truncate text-[11px] font-medium text-[color:var(--kn-text-muted)]">
-            {currentContext?.pageTitle || '当前页面'}
-          </p>
-        </div>
+        <p class="truncate text-[11px] font-semibold text-[color:var(--kn-text-muted)]">
+          {currentContext?.pageTitle || '当前页面'}
+        </p>
       </div>
-
-      <button
-        type="button"
-        class="grid h-9 w-9 shrink-0 place-items-center rounded-[8px] border border-[color:var(--kn-border)] text-[color:var(--kn-text-muted)] transition hover:border-[color:var(--kn-primary)] hover:text-[color:var(--kn-primary)]"
-        title="设置"
-        onclick={openOptions}
-      >
-        <Settings size={16} />
-      </button>
     </div>
 
-    {#if !hasToken}
-      <div
-        class="mt-3 rounded-[8px] border border-[color:var(--kn-border)] bg-[color:var(--kn-bg)] px-3 py-2 text-[12px] leading-5 text-[color:var(--kn-warning)]"
-      >
-        尚未配置访问令牌。可先连接本地后端，或在设置中填入 Token。
-      </div>
-    {/if}
+    <button
+      type="button"
+      class:active={settingsOpen}
+      class="header-action"
+      title="设置"
+      onclick={openSettings}
+    >
+      <Settings size={16} />
+    </button>
   </header>
 
-  <nav
-    class="grid grid-cols-3 border-b border-[color:var(--kn-border)] bg-[color:var(--kn-bg-raised)] px-2 py-2"
-  >
-    {#each tabs as tab (tab.id)}
-      <button
-        type="button"
-        class={`mx-1 inline-flex h-9 items-center justify-center gap-1.5 rounded-[8px] text-[12px] font-bold transition ${
-          activeTab === tab.id
-            ? 'bg-[color:var(--kn-primary-soft)] text-[color:var(--kn-primary)]'
-            : 'text-[color:var(--kn-text-muted)] hover:bg-[color:var(--kn-bg-subtle)] hover:text-[color:var(--kn-text)]'
-        }`}
-        onclick={() => (activeTab = tab.id)}
-      >
-        <svelte:component this={tab.icon} size={14} />
-        {tab.label}
-      </button>
-    {/each}
-  </nav>
-
   <div class="flex min-h-0 flex-col overflow-hidden">
-    <CapturePreview
-      pending={pendingAction}
-      output={captureOutput}
-      path={capturePath}
-      running={captureRunning}
-      error={captureError}
-      onRun={runCapture}
-      onClear={clearCapture}
-    />
-
-    {#if activeTab === 'chat'}
-      <ChatView {messages} isStreaming={chatRunning} />
-    {:else if activeTab === 'knowledge'}
-      <KnowledgeView />
+    {#if settingsOpen}
+      <SettingsPanel variant="panel" onClose={closeSettings} onSaved={handleSettingsSaved} />
     {:else}
-      <SearchView />
+      {#if !hasToken}
+        <div class="setup-banner">
+          <span>尚未配置访问令牌</span>
+          <button type="button" onclick={openSettings}>去设置</button>
+        </div>
+      {/if}
+
+      <nav class="workspace-tabs" aria-label="主视图">
+        {#each tabs as tab (tab.id)}
+          <button
+            type="button"
+            class:active={activeTab === tab.id}
+            onclick={() => (activeTab = tab.id)}
+          >
+            <svelte:component this={tab.icon} size={14} />
+            {tab.label}
+          </button>
+        {/each}
+      </nav>
+
+      <div class="flex min-h-0 flex-col overflow-hidden">
+        <CapturePreview
+          pending={pendingAction}
+          output={captureOutput}
+          path={capturePath}
+          running={captureRunning}
+          error={captureError}
+          onRun={runCapture}
+          onClear={clearCapture}
+        />
+
+        {#if activeTab === 'chat'}
+          <ChatView {messages} isStreaming={chatRunning} />
+        {:else if activeTab === 'knowledge'}
+          <KnowledgeView />
+        {:else}
+          <SearchView />
+        {/if}
+      </div>
     {/if}
   </div>
 
-  {#if activeTab === 'chat'}
+  {#if activeTab === 'chat' && !settingsOpen}
     <InputBar disabled={chatRunning} onSubmit={sendChat} onSuggestion={applySuggestion} />
   {/if}
 </main>
+
+<style>
+  .panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    border-bottom: 1px solid var(--kn-border);
+    background:
+      linear-gradient(180deg, rgb(255 255 255 / 0.86), rgb(255 255 255 / 0.64)), var(--kn-bg-raised);
+    padding: 12px 14px;
+  }
+
+  :global(:root[data-theme='dark']) .panel-header {
+    background:
+      linear-gradient(180deg, rgb(28 39 36 / 0.92), rgb(20 29 27 / 0.76)), var(--kn-bg-raised);
+  }
+
+  .header-action {
+    display: grid;
+    width: 36px;
+    height: 36px;
+    flex: 0 0 auto;
+    place-items: center;
+    border: 1px solid var(--kn-border);
+    border-radius: 8px;
+    background: var(--kn-bg-raised);
+    color: var(--kn-text-muted);
+    transition:
+      background 150ms ease,
+      border-color 150ms ease,
+      color 150ms ease,
+      transform 150ms ease;
+  }
+
+  .header-action:hover,
+  .header-action.active {
+    border-color: color-mix(in srgb, var(--kn-primary) 42%, var(--kn-border));
+    background: var(--kn-primary-soft);
+    color: var(--kn-primary);
+  }
+
+  .header-action:hover {
+    transform: translateY(-1px);
+  }
+
+  .connection-dot {
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    flex: 0 0 auto;
+    border-radius: 999px;
+  }
+
+  .connection-dot.ready {
+    background: var(--kn-accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--kn-accent) 14%, transparent);
+  }
+
+  .connection-dot.setup {
+    background: var(--kn-warning);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--kn-warning) 16%, transparent);
+  }
+
+  .setup-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    border-bottom: 1px solid color-mix(in srgb, var(--kn-warning) 24%, var(--kn-border));
+    background: color-mix(in srgb, var(--kn-warning) 9%, var(--kn-bg-raised));
+    padding: 9px 14px;
+    color: var(--kn-warning);
+    font-size: 12px;
+    font-weight: 800;
+  }
+
+  .setup-banner button {
+    height: 28px;
+    flex: 0 0 auto;
+    border: 1px solid color-mix(in srgb, var(--kn-warning) 36%, var(--kn-border));
+    border-radius: 8px;
+    background: var(--kn-bg-raised);
+    color: var(--kn-warning);
+    padding: 0 9px;
+    font-size: 12px;
+    font-weight: 800;
+  }
+
+  .workspace-tabs {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 5px;
+    border-bottom: 1px solid var(--kn-border);
+    background: var(--kn-bg-raised);
+    padding: 8px 10px;
+  }
+
+  .workspace-tabs button {
+    display: inline-flex;
+    min-width: 0;
+    height: 36px;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--kn-text-muted);
+    font-size: 12px;
+    font-weight: 800;
+    transition:
+      background 150ms ease,
+      color 150ms ease,
+      box-shadow 150ms ease;
+  }
+
+  .workspace-tabs button:hover {
+    background: var(--kn-bg-subtle);
+    color: var(--kn-text);
+  }
+
+  .workspace-tabs button.active {
+    background: var(--kn-primary-soft);
+    color: var(--kn-primary);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--kn-primary) 14%, transparent);
+  }
+</style>

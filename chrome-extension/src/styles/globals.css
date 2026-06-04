@@ -4,82 +4,97 @@
 
 :root {
   color-scheme: light;
-  --kn-bg: #f7f8f4;
+  --kn-bg: #f3f7f6;
   --kn-bg-raised: #ffffff;
-  --kn-bg-subtle: #eef2ea;
-  --kn-text: #18211f;
-  --kn-text-muted: #68736d;
-  --kn-border: #dce2dc;
-  --kn-primary: #465fd7;
+  --kn-bg-subtle: #eaf1ef;
+  --kn-field-bg: #f8fbfa;
+  --kn-text: #15211f;
+  --kn-text-muted: #687873;
+  --kn-border: #d8e3e0;
+  --kn-border-strong: #c5d3cf;
+  --kn-primary: #2f63d6;
   --kn-primary-ink: #ffffff;
-  --kn-primary-soft: #e8ecff;
-  --kn-accent: #0e8f7e;
-  --kn-warning: #ad6a00;
-  --kn-danger: #b73535;
+  --kn-primary-soft: #e7efff;
+  --kn-accent: #0a967f;
+  --kn-warning: #a76100;
+  --kn-danger: #b63e3e;
+  --kn-shadow-panel: 0 22px 58px rgb(21 39 37 / 0.16);
+  --kn-shadow-soft: 0 10px 24px rgb(21 39 37 / 0.08);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
     color-scheme: dark;
-    --kn-bg: #101512;
-    --kn-bg-raised: #171d19;
-    --kn-bg-subtle: #202821;
-    --kn-text: #edf3ee;
-    --kn-text-muted: #9aa79f;
-    --kn-border: #2f3933;
-    --kn-primary: #8fa0ff;
-    --kn-primary-ink: #10131f;
-    --kn-primary-soft: #202748;
-    --kn-accent: #4fd3bd;
-    --kn-warning: #f0b35b;
-    --kn-danger: #ff8b8b;
+    --kn-bg: #0e1513;
+    --kn-bg-raised: #17201e;
+    --kn-bg-subtle: #202d2a;
+    --kn-field-bg: #121b19;
+    --kn-text: #eef5f2;
+    --kn-text-muted: #9cada8;
+    --kn-border: #2b3a36;
+    --kn-border-strong: #40504b;
+    --kn-primary: #8fb0ff;
+    --kn-primary-ink: #0f1519;
+    --kn-primary-soft: #1d2b45;
+    --kn-accent: #55d0bc;
+    --kn-warning: #f0b463;
+    --kn-danger: #ff9292;
+    --kn-shadow-panel: 0 22px 58px rgb(0 0 0 / 0.34);
+    --kn-shadow-soft: 0 10px 24px rgb(0 0 0 / 0.24);
   }
 }
 
 :root[data-theme='light'] {
   color-scheme: light;
-  --kn-bg: #f7f8f4;
+  --kn-bg: #f3f7f6;
   --kn-bg-raised: #ffffff;
-  --kn-bg-subtle: #eef2ea;
-  --kn-text: #18211f;
-  --kn-text-muted: #68736d;
-  --kn-border: #dce2dc;
-  --kn-primary: #465fd7;
+  --kn-bg-subtle: #eaf1ef;
+  --kn-field-bg: #f8fbfa;
+  --kn-text: #15211f;
+  --kn-text-muted: #687873;
+  --kn-border: #d8e3e0;
+  --kn-border-strong: #c5d3cf;
+  --kn-primary: #2f63d6;
   --kn-primary-ink: #ffffff;
-  --kn-primary-soft: #e8ecff;
-  --kn-accent: #0e8f7e;
-  --kn-warning: #ad6a00;
-  --kn-danger: #b73535;
+  --kn-primary-soft: #e7efff;
+  --kn-accent: #0a967f;
+  --kn-warning: #a76100;
+  --kn-danger: #b63e3e;
+  --kn-shadow-panel: 0 22px 58px rgb(21 39 37 / 0.16);
+  --kn-shadow-soft: 0 10px 24px rgb(21 39 37 / 0.08);
 }
 
 :root[data-theme='dark'] {
   color-scheme: dark;
-  --kn-bg: #101512;
-  --kn-bg-raised: #171d19;
-  --kn-bg-subtle: #202821;
-  --kn-text: #edf3ee;
-  --kn-text-muted: #9aa79f;
-  --kn-border: #2f3933;
-  --kn-primary: #8fa0ff;
-  --kn-primary-ink: #10131f;
-  --kn-primary-soft: #202748;
-  --kn-accent: #4fd3bd;
-  --kn-warning: #f0b35b;
-  --kn-danger: #ff8b8b;
+  --kn-bg: #0e1513;
+  --kn-bg-raised: #17201e;
+  --kn-bg-subtle: #202d2a;
+  --kn-field-bg: #121b19;
+  --kn-text: #eef5f2;
+  --kn-text-muted: #9cada8;
+  --kn-border: #2b3a36;
+  --kn-border-strong: #40504b;
+  --kn-primary: #8fb0ff;
+  --kn-primary-ink: #0f1519;
+  --kn-primary-soft: #1d2b45;
+  --kn-accent: #55d0bc;
+  --kn-warning: #f0b463;
+  --kn-danger: #ff9292;
+  --kn-shadow-panel: 0 22px 58px rgb(0 0 0 / 0.34);
+  --kn-shadow-soft: 0 10px 24px rgb(0 0 0 / 0.24);
 }
 
 html,
 body,
 #app {
   min-width: 0;
+  height: 100%;
   min-height: 100%;
   margin: 0;
 }
 
 body {
-  background:
-    radial-gradient(circle at 12% -8%, rgb(70 95 215 / 0.12), transparent 26rem),
-    linear-gradient(180deg, var(--kn-bg), color-mix(in srgb, var(--kn-bg) 94%, #000 6%));
+  background: linear-gradient(180deg, var(--kn-bg), color-mix(in srgb, var(--kn-bg) 94%, #000 6%));
   color: var(--kn-text);
   font-family: 'Aptos', 'Segoe UI', ui-sans-serif, system-ui, sans-serif;
   letter-spacing: 0;
@@ -119,4 +134,8 @@ select:focus-visible {
   border: 3px solid transparent;
   border-radius: 999px;
   background-clip: padding-box;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--kn-primary) 22%, transparent);
 }

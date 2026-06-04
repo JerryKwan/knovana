@@ -10,8 +10,8 @@
 
 - WXT + Svelte + TypeScript 的 Chrome MV3 基础工程。
 - Background Service Worker，负责右键菜单、快捷键、Side Panel 打开、当前页面上下文采集和内部消息路由。
-- Side Panel，包含对话、知识库、搜索和捕获预览。
-- Options 页面，包含后端地址、访问令牌、主题和自动打开侧栏设置。
+- Side Panel，包含对话、知识库、搜索、捕获预览和侧边栏内设置面板。
+- Options 页面作为 Chrome 标准备用入口，复用侧边栏设置面板。
 - `marked` + `DOMPurify` 的 Markdown 渲染，保证 AI 输出和知识库内容先解析再清洗。
 
 阶段二再增加：
@@ -60,7 +60,8 @@ chrome-extension/
 │   │   ├── capture/
 │   │   ├── chat/
 │   │   ├── common/
-│   │   └── knowledge/
+│   │   ├── knowledge/
+│   │   └── settings/
 │   ├── services/                 # API、SSE、capture、storage、messaging、theme
 │   ├── styles/
 │   ├── test/
@@ -147,7 +148,7 @@ chrome-extension/
 
 ## 2. 三层架构与通信
 
-阶段一当前只启用 **Service Worker + Side Panel / Options**。页面上下文由 Service Worker 在需要时通过 `chrome.scripting.executeScript` 采集，Side Panel 通过 `chrome.runtime.sendMessage` 与 Service Worker 通信。
+阶段一当前只启用 **Service Worker + Side Panel / Options**。页面上下文由 Service Worker 在需要时通过 `chrome.scripting.executeScript` 采集，Side Panel 通过 `chrome.runtime.sendMessage` 与 Service Worker 通信。日常设置在 Side Panel 内完成，Options 页面仅作为 Chrome 标准备用入口。
 
 阶段二加入 Content Script 后，Chrome 扩展的三个执行环境彼此隔离，通过消息通信：
 
@@ -423,15 +424,15 @@ export default defineContentScript({
 
 ## 5. Side Panel（侧边栏，阶段一）
 
-Side Panel 是阶段一的主要用户界面。当前包含三个主要视图：对话、知识库和搜索，并在对话区上方承载右键/快捷键触发的捕获预览。
+Side Panel 是阶段一的主要用户界面。当前包含对话、知识库、搜索和设置视图，并在对话区上方承载右键/快捷键触发的捕获预览。
 
 ### 5.1 布局结构
 
 ```
 ┌─────────────────────────────────┐
-│ 🧠 Knovana              ⚙️  ×  │  ← Header
+│  K  Knovana                 ⚙   │  ← Header
 ├─────────────────────────────────┤
-│ 💬 对话  │  📚 知识库  │  🔍 搜索│  ← Tab 导航
+│ 对话      知识库      搜索       │  ← Tab 导航
 ├─────────────────────────────────┤
 │                                 │
 │                                 │
@@ -443,12 +444,12 @@ Side Panel 是阶段一的主要用户界面。当前包含三个主要视图：
 │                                 │
 │                                 │
 ├─────────────────────────────────┤
-│ 📍 当前: example.com/article    │  ← 上下文信息栏
-├─────────────────────────────────┤
-│ 📎  💡 建议          [ 发送 ➤ ] │  ← 输入栏
+│ 建议操作                 [发送] │  ← 输入栏
 │ 输入消息...                      │
 └─────────────────────────────────┘
 ```
+
+点击 Header 设置按钮时，主内容区切换为 `SettingsPanel`，不再调用 Chrome 的 `openOptionsPage()` 打开扩展管理页弹窗。
 
 ### 5.2 Chat View
 
@@ -473,6 +474,13 @@ Side Panel 是阶段一的主要用户界面。当前包含三个主要视图：
 - 搜索输入框（300ms 防抖）
 - 搜索结果列表
 - 搜索由后端 grep + Claude 完成
+
+### 5.5 Settings View
+
+- `SettingsPanel` 同时服务 Side Panel 内设置视图和 Chrome Options 备用页面
+- 支持后端 URL、Access Token、主题和右键动作后自动打开侧栏
+- 支持测试后端连接，保存后立即应用主题并刷新侧栏 Token 状态
+- 侧边栏设置是主入口，避免 Chrome options 弹窗与 Side Panel 空间割裂
 
 ---
 
@@ -566,7 +574,7 @@ export const currentPageInfo = writable<PageMetadata | null>(null);
 
 ## 8. API 通信
 
-阶段一当前由 Side Panel 通过 Service Worker 代理对话、捕获、知识库和搜索请求；Options 页面直接测试后端连接。阶段二引入浮动面板后，应统一 API 客户端、错误格式、超时/取消和认证头处理。
+阶段一当前由 Side Panel 通过 Service Worker 代理对话、捕获、知识库和搜索请求；`SettingsPanel` 直接测试后端连接。阶段二引入浮动面板后，应统一 API 客户端、错误格式、超时/取消和认证头处理。
 
 目标 API 通信方式：
 
@@ -646,7 +654,7 @@ class KnovanaAPI {
 
 | 产品 | 借鉴 |
 |------|------|
-| **Gemini** | 上下文感知建议操作；持久化侧边栏 |
+| **Gemini** | 上下文感知建议操作；持久化侧边栏；白底中心符号的工具栏图标可读性 |
 | **Claude** | 流式 Markdown 渲染质量；消息操作按钮 |
 | **ChatGPT** | 会话管理 UI；快速操作按钮 |
 | **Notion Web Clipper** | 一键保存 + 标签选择 |
@@ -655,19 +663,20 @@ class KnovanaAPI {
 
 ```css
 :root {
-  /* 主色 — 知性深蓝紫 */
-  --primary: #6366F1;
-  --primary-hover: #4F46E5;
-  --primary-light: #EEF2FF;
-
-  /* 暗色模式（默认跟随系统） */
-  --bg-primary: #0F0F1A;
-  --bg-secondary: #1A1A2E;
-  --text-primary: #F1F5F9;
-  --text-secondary: #94A3B8;
-  --border: #334155;
+  --kn-bg: #f3f7f6;
+  --kn-bg-raised: #ffffff;
+  --kn-bg-subtle: #eaf1ef;
+  --kn-field-bg: #f8fbfa;
+  --kn-text: #15211f;
+  --kn-text-muted: #687873;
+  --kn-border: #d8e3e0;
+  --kn-primary: #2f63d6;
+  --kn-primary-soft: #e7efff;
+  --kn-accent: #0a967f;
 }
 ```
+
+图标采用透明背景 + 晶体折面 K 的视觉语言，保留 `public/icon/source.svg` 作为源文件，并输出 Chrome 所需的 `16/32/48/96/128.png` 尺寸组。
 
 ### 9.3 交互原则
 

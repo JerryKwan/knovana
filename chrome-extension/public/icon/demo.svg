@@ -1,0 +1,269 @@
+<svg width="100%" viewBox="0 0 680 780" role="img" xmlns="http://www.w3.org/2000/svg" style="max-width: 680px; display: block; margin-inline: auto;">
+<title>Knovana Prism icon — refined</title>
+<desc>White-tile icon with three sharp geometric color facets forming a K, optimized for Chrome toolbar</desc>
+<defs>
+  <linearGradient id="tile" x1="0" y1="0" x2="0.6" y2="1">
+    <stop offset="0" stop-color="#FFFFFF"></stop>
+    <stop offset="1" stop-color="#F4F7FA"></stop>
+  </linearGradient>
+  <linearGradient id="tileEdge" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#E0E8F0"></stop>
+    <stop offset="1" stop-color="#C8D6E0"></stop>
+  </linearGradient>
+
+  <linearGradient id="stemGrad" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#1E40AF"></stop>
+    <stop offset="1" stop-color="#1D3082"></stop>
+  </linearGradient>
+
+  <linearGradient id="faceTop" x1="0" y1="1" x2="1" y2="0">
+    <stop offset="0" stop-color="#1D4FD7"></stop>
+    <stop offset="0.6" stop-color="#2D6FE8"></stop>
+    <stop offset="1" stop-color="#5B9CF5"></stop>
+  </linearGradient>
+
+  <linearGradient id="faceBot" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#0C8B7F"></stop>
+    <stop offset="0.55" stop-color="#0E9B89"></stop>
+    <stop offset="1" stop-color="#0FB87E"></stop>
+  </linearGradient>
+
+  <linearGradient id="faceTopSm" x1="0" y1="1" x2="1" y2="0">
+    <stop offset="0" stop-color="#1D4FD7"></stop>
+    <stop offset="1" stop-color="#5B9CF5"></stop>
+  </linearGradient>
+  <linearGradient id="faceBotSm" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#0C8B7F"></stop>
+    <stop offset="1" stop-color="#0FB87E"></stop>
+  </linearGradient>
+
+  <filter id="cardShadow">
+    <feDropShadow dx="0" dy="5" stdDeviation="7" flood-color="#1E3A8A" flood-opacity="0.12"></feDropShadow>
+  </filter>
+  <filter id="cardShadowSm">
+    <feDropShadow dx="0" dy="3" stdDeviation="4" flood-color="#1E3A8A" flood-opacity="0.10"></feDropShadow>
+  </filter>
+<mask id="imagine-text-gaps-kgz512" maskUnits="userSpaceOnUse"><rect x="0" y="0" width="680" height="780" fill="white"></rect><rect x="275.4791564941406" y="24.44444465637207" width="129.04166412353516" height="18.222222328186035" fill="black" rx="2"></rect><rect x="319.1111145019531" y="76.44444274902344" width="73.02777862548828" height="18.222222328186035" fill="black" rx="2"></rect><rect x="319.1111145019531" y="91.22222137451172" width="89.55555725097656" height="16.44444465637207" fill="black" rx="2"></rect><rect x="360" y="39.4444465637207" width="98.83333587646484" height="18.222222328186035" fill="black" rx="2"></rect><rect x="360" y="54.22222137451172" width="103.93055725097656" height="16.44444465637207" fill="black" rx="2"></rect><rect x="359.1111145019531" y="156.44444274902344" width="99.72222137451172" height="18.222222328186035" fill="black" rx="2"></rect><rect x="360" y="171.22222900390625" width="98" height="16.44444465637207" fill="black" rx="2"></rect><rect x="359.1111145019531" y="113.44444274902344" width="106.56732940673828" height="18.222222328186035" fill="black" rx="2"></rect><rect x="360" y="128.22222900390625" width="128.66666412353516" height="16.44444465637207" fill="black" rx="2"></rect><rect x="299.0833435058594" y="244.44444274902344" width="81.83333587646484" height="18.222222328186035" fill="black" rx="2"></rect><rect x="88.47222137451172" y="372.22222900390625" width="31.31673240661621" height="16.44444465637207" fill="black" rx="2"></rect><rect x="192.47222900390625" y="356.22222900390625" width="31.31673240661621" height="16.44444465637207" fill="black" rx="2"></rect><rect x="271.5833435058594" y="348.22222900390625" width="32.20562171936035" height="16.44444465637207" fill="black" rx="2"></rect><rect x="336.47222900390625" y="340.22222900390625" width="31.31673240661621" height="16.44444465637207" fill="black" rx="2"></rect><rect x="384.47222900390625" y="336.22222900390625" width="31.31673240661621" height="16.44444465637207" fill="black" rx="2"></rect><rect x="422.47222900390625" y="332.22222900390625" width="31.31673240661621" height="16.44444465637207" fill="black" rx="2"></rect><rect x="273.9583435058594" y="396.4444580078125" width="132.08333587646484" height="18.222222328186035" fill="black" rx="2"></rect><rect x="285.47222900390625" y="564.4444580078125" width="109.05555725097656" height="18.222222328186035" fill="black" rx="2"></rect><rect x="80.19444274902344" y="645.2222290039062" width="50.73101043701172" height="16.44444465637207" fill="black" rx="2"></rect><rect x="89.9375" y="657.2222290039062" width="32.125" height="16.44444465637207" fill="black" rx="2"></rect><rect x="152.29861450195312" y="645.2222290039062" width="50.51388931274414" height="16.44444465637207" fill="black" rx="2"></rect><rect x="151.0902862548828" y="657.2222290039062" width="54.35405731201172" height="16.44444465637207" fill="black" rx="2"></rect><rect x="223.7777862548828" y="645.2222290039062" width="51.6201171875" height="16.44444465637207" fill="black" rx="2"></rect><rect x="227.74305725097656" y="657.2222290039062" width="44.51388931274414" height="16.44444465637207" fill="black" rx="2"></rect><rect x="315.4444580078125" y="645.2222290039062" width="52.56716537475586" height="16.44444465637207" fill="black" rx="2"></rect><rect x="315.34722900390625" y="657.2222290039062" width="52.95290756225586" height="16.44444465637207" fill="black" rx="2"></rect><rect x="388.1180725097656" y="645.2222290039062" width="50.875" height="16.44444465637207" fill="black" rx="2"></rect><rect x="382.65972900390625" y="657.2222290039062" width="62.68055725097656" height="16.44444465637207" fill="black" rx="2"></rect><rect x="460.9166564941406" y="645.2222290039062" width="49.3447265625" height="16.44444465637207" fill="black" rx="2"></rect><rect x="472.7430725097656" y="657.2222290039062" width="26.16579818725586" height="16.44444465637207" fill="black" rx="2"></rect><rect x="299.1111145019531" y="606.2222290039062" width="18.777777671813965" height="16.44444465637207" fill="black" rx="2"></rect><rect x="271.6805725097656" y="700.4444580078125" width="136.63888549804688" height="18.222222328186035" fill="black" rx="2"></rect></mask></defs>
+
+<!-- ══════════════════════════════════
+     ANATOMY EXPLAINER — what each part means
+     ══════════════════════════════════ -->
+<text x="340" y="38" font-family="system-ui,sans-serif" font-size="11" fill="#999" text-anchor="middle" letter-spacing="1.5">DESIGN ANATOMY</text>
+
+<!-- 160px hero icon -->
+<g transform="translate(100, 52)">
+  <rect x="0" y="0" width="160" height="160" rx="36" fill="url(#tile)" filter="url(#cardShadow)"></rect>
+  <rect x="0.75" y="0.75" width="158.5" height="158.5" rx="35.5" fill="none" stroke="url(#tileEdge)" stroke-width="1"></rect>
+
+  <!-- STEM — book spine, sharp rectangular edges for structural authority -->
+  <rect x="26" y="24" width="30" height="112" rx="2" fill="url(#stemGrad)"></rect>
+  <rect x="26" y="24" width="5" height="112" rx="2" fill="#0F1F5C" opacity="0.45"></rect>
+  <rect x="26" y="24" width="30" height="3" rx="2" fill="white" opacity="0.22"></rect>
+  <rect x="54.5" y="24" width="1.5" height="112" rx="2" fill="white" opacity="0.10"></rect>
+
+  <!-- UPPER FACE — wider K arm, darkened blue -->
+  <polygon points="56,80  82,24  102,24  126,40  90,80" fill="url(#faceTop)"></polygon>
+  <polygon points="58,75  82,26  96,26  76,50" fill="white" opacity="0.12"></polygon>
+
+  <!-- LOWER FACE — mirror K arm, teal-emerald -->
+  <polygon points="56,80  90,80  126,120  102,136  82,136" fill="url(#faceBot)"></polygon>
+  <polygon points="58,83  80,83  94,97  74,113" fill="white" opacity="0.09"></polygon>
+
+  <!-- Fold crease — structural seam where faces meet -->
+  <line x1="56" y1="80" x2="90" y2="80" stroke="#0F2E5C" stroke-width="1.2" opacity="0.20"></line>
+</g>
+
+<!-- Annotation lines pointing to parts -->
+<line x1="270" y1="108" x2="320" y2="95" stroke="#CBD5E1" stroke-width="0.75" stroke-dasharray="3,3"></line>
+<text x="324" y="90" font-family="system-ui,sans-serif" font-size="11" fill="#64748B">书脊 · 知识库</text>
+<text x="324" y="103" font-family="system-ui,sans-serif" font-size="10" fill="#94A3B8">稳定、持久的蓄积</text>
+
+<line x1="310" y1="85" x2="360" y2="58" stroke="#CBD5E1" stroke-width="0.75" stroke-dasharray="3,3" mask="url(#imagine-text-gaps-kgz512)"></line>
+<text x="364" y="53" font-family="system-ui,sans-serif" font-size="11" fill="#64748B">蓝色面 · 采集/输入</text>
+<text x="364" y="66" font-family="system-ui,sans-serif" font-size="10" fill="#94A3B8">网页 → 知识库的流动</text>
+
+<line x1="310" y1="165" x2="360" y2="175" stroke="#CBD5E1" stroke-width="0.75" stroke-dasharray="3,3"></line>
+<text x="364" y="170" font-family="system-ui,sans-serif" font-size="11" fill="#64748B">绿色面 · 沉淀/复用</text>
+<text x="364" y="183" font-family="system-ui,sans-serif" font-size="10" fill="#94A3B8">已结构化的知识输出</text>
+
+<line x1="260" y1="132" x2="360" y2="132" stroke="#CBD5E1" stroke-width="0.75" stroke-dasharray="3,3" mask="url(#imagine-text-gaps-kgz512)"></line>
+<text x="364" y="127" font-family="system-ui,sans-serif" font-size="11" fill="#64748B">共享顶点 · 无连接条</text>
+<text x="364" y="140" font-family="system-ui,sans-serif" font-size="10" fill="#94A3B8">两面自然相遇，几何即语义</text>
+
+<!-- ══════════════════════════════════
+     SIZE SCALE
+     ══════════════════════════════════ -->
+<text x="340" y="258" font-family="system-ui,sans-serif" font-size="11" fill="#999" text-anchor="middle" letter-spacing="1.5">SIZE SCALE</text>
+
+<!-- 96px -->
+<g transform="translate(56, 272)">
+  <rect x="0" y="0" width="96" height="96" rx="22" fill="url(#tile)" filter="url(#cardShadow)"></rect>
+  <rect x="0.5" y="0.5" width="95" height="95" rx="21.5" fill="none" stroke="url(#tileEdge)" stroke-width="0.75"></rect>
+  <rect x="16" y="14" width="18" height="68" rx="1.5" fill="url(#stemGrad)"></rect>
+  <rect x="16" y="14" width="3" height="68" rx="1.5" fill="#0F1F5C" opacity="0.45"></rect>
+  <rect x="16" y="14" width="18" height="2" rx="1.5" fill="white" opacity="0.22"></rect>
+  <polygon points="34,48  50,13  62,13  78,25  54,48" fill="url(#faceTopSm)"></polygon>
+  <polygon points="34,49  54,49  78,71  62,83  50,83" fill="url(#faceBotSm)"></polygon>
+  <line x1="34" y1="48.5" x2="54" y2="48.5" stroke="#0F2E5C" stroke-width="0.8" opacity="0.18"></line>
+</g>
+<text x="104" y="384" font-family="system-ui,sans-serif" font-size="10" fill="#94A3B8" text-anchor="middle">96px</text>
+
+<!-- 64px -->
+<g transform="translate(176, 288)">
+  <rect x="0" y="0" width="64" height="64" rx="15" fill="url(#tile)" filter="url(#cardShadow)"></rect>
+  <rect x="0.5" y="0.5" width="63" height="63" rx="14.5" fill="none" stroke="url(#tileEdge)" stroke-width="0.75"></rect>
+  <rect x="11" y="9" width="12" height="46" rx="1" fill="url(#stemGrad)"></rect>
+  <rect x="11" y="9" width="2.5" height="46" rx="1" fill="#0F1F5C" opacity="0.45"></rect>
+  <polygon points="23,32  34,9  41,9  52,17  36,32" fill="url(#faceTopSm)"></polygon>
+  <polygon points="23,33  36,33  52,47  41,55  34,55" fill="url(#faceBotSm)"></polygon>
+  <line x1="23" y1="32.5" x2="36" y2="32.5" stroke="#0F2E5C" stroke-width="0.75" opacity="0.18"></line>
+</g>
+<text x="208" y="368" font-family="system-ui,sans-serif" font-size="10" fill="#94A3B8" text-anchor="middle">64px</text>
+
+<!-- 48px -->
+<g transform="translate(264, 296)">
+  <rect x="0" y="0" width="48" height="48" rx="11" fill="url(#tile)" filter="url(#cardShadow)"></rect>
+  <rect x="0.5" y="0.5" width="47" height="47" rx="10.5" fill="none" stroke="url(#tileEdge)" stroke-width="0.5"></rect>
+  <rect x="8" y="7" width="9" height="34" rx="1" fill="url(#stemGrad)"></rect>
+  <rect x="8" y="7" width="2" height="34" rx="1" fill="#0F1F5C" opacity="0.45"></rect>
+  <polygon points="17,24  26,7  32,7  39,13  27,24" fill="url(#faceTopSm)"></polygon>
+  <polygon points="17,25  27,25  39,35  32,41  26,41" fill="url(#faceBotSm)"></polygon>
+</g>
+<text x="288" y="360" font-family="system-ui,sans-serif" font-size="10" fill="#94A3B8" text-anchor="middle">48px</text>
+
+<!-- 32px -->
+<g transform="translate(336, 304)">
+  <rect x="0" y="0" width="32" height="32" rx="7.5" fill="url(#tile)" filter="url(#cardShadow)"></rect>
+  <rect x="0.5" y="0.5" width="31" height="31" rx="7" fill="none" stroke="url(#tileEdge)" stroke-width="0.5"></rect>
+  <rect x="5.5" y="5" width="6" height="22" rx="0.75" fill="url(#stemGrad)"></rect>
+  <rect x="5.5" y="5" width="1.5" height="22" rx="0.75" fill="#0F1F5C" opacity="0.45"></rect>
+  <polygon points="11.5,16  17,5  21,5  26,9  18,16" fill="url(#faceTopSm)"></polygon>
+  <polygon points="11.5,16.5  18,16.5  26,23  21,27  17,27" fill="url(#faceBotSm)"></polygon>
+</g>
+<text x="352" y="352" font-family="system-ui,sans-serif" font-size="10" fill="#94A3B8" text-anchor="middle">32px</text>
+
+<!-- 24px -->
+<g transform="translate(388, 308)">
+  <rect x="0" y="0" width="24" height="24" rx="5.5" fill="url(#tile)" filter="url(#cardShadowSm)"></rect>
+  <rect x="0.5" y="0.5" width="23" height="23" rx="5" fill="none" stroke="#D4DDE8" stroke-width="0.5"></rect>
+  <rect x="4" y="3.5" width="4.5" height="17" rx="0.5" fill="url(#stemGrad)"></rect>
+  <polygon points="8.5,12  12.5,3.5  15.5,3.5  19,6.5  13.5,12" fill="url(#faceTopSm)"></polygon>
+  <polygon points="8.5,12.5  13.5,12.5  19,17.5  15.5,20.5  12.5,20.5" fill="url(#faceBotSm)"></polygon>
+</g>
+<text x="400" y="348" font-family="system-ui,sans-serif" font-size="10" fill="#94A3B8" text-anchor="middle">24px</text>
+
+<!-- 16px -->
+<g transform="translate(430, 312)">
+  <rect x="0" y="0" width="16" height="16" rx="3.5" fill="url(#tile)"></rect>
+  <rect x="0.5" y="0.5" width="15" height="15" rx="3" fill="none" stroke="#D4DDE8" stroke-width="0.5"></rect>
+  <rect x="2.5" y="2.5" width="3.5" height="11" rx="0.5" fill="#1E40AF"></rect>
+  <polygon points="6,8  8.5,2.5  10.5,2.5  13,4.5  9.5,8" fill="#1D4FD7"></polygon>
+  <polygon points="6,8.5  9.5,8.5  13,11.5  10.5,13.5  8.5,13.5" fill="#0C8B7F"></polygon>
+</g>
+<text x="438" y="344" font-family="system-ui,sans-serif" font-size="10" fill="#94A3B8" text-anchor="middle">16px</text>
+
+
+<!-- ══════════════════════════════════
+     CHROME TOOLBAR — DARK + LIGHT
+     ══════════════════════════════════ -->
+<text x="340" y="410" font-family="system-ui,sans-serif" font-size="11" fill="#999" text-anchor="middle" letter-spacing="1.5">CHROME TOOLBAR</text>
+
+<!-- Dark chrome -->
+<rect x="40" y="420" width="600" height="56" rx="12" fill="#202124"></rect>
+<rect x="40.5" y="420.5" width="599" height="55" rx="11.5" fill="none" stroke="#3C3C3F" stroke-width="0.5"></rect>
+<circle cx="68" cy="448" r="8" fill="#35353A"></circle>
+<circle cx="90" cy="448" r="8" fill="#35353A"></circle>
+<circle cx="112" cy="448" r="8" fill="#35353A"></circle>
+<rect x="130" y="436" width="230" height="24" rx="12" fill="#303134"></rect>
+<circle cx="572" cy="448" r="7" fill="#35353A"></circle>
+<circle cx="552" cy="448" r="7" fill="#35353A"></circle>
+<circle cx="532" cy="448" r="7" fill="#35353A"></circle>
+
+<!-- icon 28px in dark toolbar -->
+<g transform="translate(482, 434)">
+  <rect x="0" y="0" width="28" height="28" rx="7" fill="url(#tile)" filter="url(#cardShadowSm)"></rect>
+  <rect x="0.5" y="0.5" width="27" height="27" rx="6.5" fill="none" stroke="#D0DCE8" stroke-width="0.5"></rect>
+  <rect x="5" y="4" width="6.5" height="20" rx="0.75" fill="url(#stemGrad)"></rect>
+  <rect x="5" y="4" width="1.5" height="20" rx="0.75" fill="#0F1F5C" opacity="0.45"></rect>
+  <polygon points="11.5,14  17,4  21,4  25.5,8  18.5,14" fill="url(#faceTopSm)"></polygon>
+  <polygon points="11.5,14.5  18.5,14.5  25.5,20.5  21,24  17,24" fill="url(#faceBotSm)"></polygon>
+</g>
+
+<!-- Light chrome -->
+<rect x="40" y="490" width="600" height="56" rx="12" fill="#F1F3F4"></rect>
+<rect x="40.5" y="490.5" width="599" height="55" rx="11.5" fill="none" stroke="#E0E4E8" stroke-width="0.5"></rect>
+<circle cx="68" cy="518" r="8" fill="#DDE0E4"></circle>
+<circle cx="90" cy="518" r="8" fill="#DDE0E4"></circle>
+<circle cx="112" cy="518" r="8" fill="#DDE0E4"></circle>
+<rect x="130" y="506" width="230" height="24" rx="12" fill="#FFFFFF"></rect>
+<circle cx="572" cy="518" r="7" fill="#DDE0E4"></circle>
+<circle cx="552" cy="518" r="7" fill="#DDE0E4"></circle>
+<circle cx="532" cy="518" r="7" fill="#DDE0E4"></circle>
+
+<g transform="translate(482, 504)">
+  <rect x="0" y="0" width="28" height="28" rx="7" fill="url(#tile)" filter="url(#cardShadowSm)"></rect>
+  <rect x="0.5" y="0.5" width="27" height="27" rx="6.5" fill="none" stroke="#C8D4E0" stroke-width="0.75"></rect>
+  <rect x="5" y="4" width="6.5" height="20" rx="0.75" fill="url(#stemGrad)"></rect>
+  <rect x="5" y="4" width="1.5" height="20" rx="0.75" fill="#0F1F5C" opacity="0.45"></rect>
+  <polygon points="11.5,14  17,4  21,4  25.5,8  18.5,14" fill="url(#faceTopSm)"></polygon>
+  <polygon points="11.5,14.5  18.5,14.5  25.5,20.5  21,24  17,24" fill="url(#faceBotSm)"></polygon>
+</g>
+
+<!-- ══════════════════════════════════
+     COLOR PALETTE
+     ══════════════════════════════════ -->
+<text x="340" y="578" font-family="system-ui,sans-serif" font-size="11" fill="#999" text-anchor="middle" letter-spacing="1.5">COLOR SYSTEM</text>
+
+<rect x="80" y="590" width="52" height="52" rx="10" fill="#1E40AF"></rect>
+<text x="106" y="657" font-family="system-ui,sans-serif" font-size="10" fill="#64748B" text-anchor="middle">#1E40AF</text>
+<text x="106" y="669" font-family="system-ui,sans-serif" font-size="10" fill="#94A3B8" text-anchor="middle">Stem</text>
+
+<rect x="152" y="590" width="52" height="52" rx="10" fill="#1D4FD7"></rect>
+<text x="178" y="657" font-family="system-ui,sans-serif" font-size="10" fill="#64748B" text-anchor="middle">#1D4FD7</text>
+<text x="178" y="669" font-family="system-ui,sans-serif" font-size="10" fill="#94A3B8" text-anchor="middle">Blue base</text>
+
+<rect x="224" y="590" width="52" height="52" rx="10" fill="#5B9CF5"></rect>
+<text x="250" y="657" font-family="system-ui,sans-serif" font-size="10" fill="#64748B" text-anchor="middle">#5B9CF5</text>
+<text x="250" y="669" font-family="system-ui,sans-serif" font-size="10" fill="#94A3B8" text-anchor="middle">Blue tip</text>
+
+<rect x="316" y="590" width="52" height="52" rx="10" fill="#0C8B7F"></rect>
+<text x="342" y="657" font-family="system-ui,sans-serif" font-size="10" fill="#64748B" text-anchor="middle">#0C8B7F</text>
+<text x="342" y="669" font-family="system-ui,sans-serif" font-size="10" fill="#94A3B8" text-anchor="middle">Teal base</text>
+
+<rect x="388" y="590" width="52" height="52" rx="10" fill="#0FB87E"></rect>
+<text x="414" y="657" font-family="system-ui,sans-serif" font-size="10" fill="#64748B" text-anchor="middle">#0FB87E</text>
+<text x="414" y="669" font-family="system-ui,sans-serif" font-size="10" fill="#94A3B8" text-anchor="middle">Emerald tip</text>
+
+<rect x="460" y="590" width="52" height="52" rx="10" fill="#F4F7FA"></rect>
+<rect x="460.5" y="590.5" width="51" height="51" rx="9.5" fill="none" stroke="#D4DCE8" stroke-width="0.75"></rect>
+<text x="486" y="657" font-family="system-ui,sans-serif" font-size="10" fill="#64748B" text-anchor="middle">#F4F7FA</text>
+<text x="486" y="669" font-family="system-ui,sans-serif" font-size="10" fill="#94A3B8" text-anchor="middle">Tile</text>
+
+<!-- Divider between stem and faces -->
+<line x1="296" y1="600" x2="296" y2="632" stroke="#E2E8F0" stroke-width="1"></line>
+<text x="304" y="618" font-family="system-ui,sans-serif" font-size="10" fill="#CBD5E1">vs</text>
+
+<!-- ══════════════════════════════════
+     FINAL 128px — clean solo render
+     ══════════════════════════════════ -->
+<text x="340" y="714" font-family="system-ui,sans-serif" font-size="11" fill="#999" text-anchor="middle" letter-spacing="1.5">FINAL — 128 × 128</text>
+
+<g transform="translate(276, 724)">
+  <rect x="0" y="0" width="128" height="128" rx="29" fill="url(#tile)" filter="url(#cardShadow)"></rect>
+  <rect x="0.75" y="0.75" width="126.5" height="126.5" rx="28.5" fill="none" stroke="url(#tileEdge)" stroke-width="1"></rect>
+
+  <rect x="20" y="19" width="24" height="90" rx="1.5" fill="url(#stemGrad)"></rect>
+  <rect x="20" y="19" width="4" height="90" rx="1.5" fill="#0F1F5C" opacity="0.45"></rect>
+  <rect x="20" y="19" width="24" height="2.5" rx="1.5" fill="white" opacity="0.22"></rect>
+  <rect x="42.5" y="19" width="1.2" height="90" rx="1.5" fill="white" opacity="0.10"></rect>
+
+  <polygon points="44,64  66,19  82,19  102,33  72,64" fill="url(#faceTop)"></polygon>
+  <polygon points="66,21  78,21  90,30  72,46" fill="white" opacity="0.10"></polygon>
+
+  <polygon points="44,65  72,65  102,95  82,109  66,109" fill="url(#faceBot)"></polygon>
+  <polygon points="46,67  64,67  74,78  58,92" fill="white" opacity="0.08"></polygon>
+
+  <line x1="44" y1="64.5" x2="72" y2="64.5" stroke="#0F2E5C" stroke-width="1" opacity="0.20"></line>
+</g>
+
+</svg>

@@ -7,6 +7,7 @@
 Chrome 扩展与后端之间的 HTTP API 规范。
 
 - **Base URL**: `http://localhost:8000/api`（开发）/ `https://api.knovana.com/api`（生产）
+- **后端实现**: Node.js + TypeScript + Hono，Agent Runtime 使用 `claude-agent-sdk-typescript`
 - **认证**: 所有接口（除 auth）需要 `Authorization: Bearer <JWT>` Header
 - **流式接口**: Chat 和 Capture 使用 SSE（Server-Sent Events）
 - **内容类型**: `application/json`（常规）/ `text/event-stream`（流式）
@@ -400,4 +401,4 @@ file: <binary image data>
 | 403 | `FORBIDDEN` | 无权访问 |
 | 404 | `NOT_FOUND` | 资源不存在 |
 | 500 | `INTERNAL_ERROR` | 服务器内部错误 |
-| 503 | `AGENT_ERROR` | Claude Agent 处理失败 |
+| 503 | `AGENT_ERROR` | Claude Agent SDK TypeScript 处理失败 |

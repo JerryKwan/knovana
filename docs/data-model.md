@@ -296,10 +296,10 @@ Chrome 扩展组装 CaptureRequest
   }
        │
        ▼
-POST /api/capture → FastAPI 路由
+POST /api/capture → Hono 路由
        │
        ▼
-Claude Agent 接收指令：
+claude-agent-sdk-typescript Agent 接收指令：
   "用户从 {page_url} 捕获了以下内容，请整理后保存到知识库:
    {content}
    附件图片: {image_url}"

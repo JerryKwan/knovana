@@ -45,7 +45,12 @@ chrome-extension\.output\chrome-mv3
 3. 在网页中选中文本、右键页面/链接/图片，使用右键菜单中的 Knovana 动作。
 4. 使用快捷键 `Alt+Q` 打开侧边栏；如果快捷键没有生效，到 `chrome://extensions/shortcuts` 检查是否被 Chrome 分配或被其他扩展占用。
 
-设置页入口：
+设置入口：
+
+1. 打开 Knovana Side Panel。
+2. 点击右上角设置按钮，在侧边栏内配置后端地址、访问令牌、主题和自动打开侧栏。
+
+Chrome 仍保留标准扩展选项入口，作为侧边栏之外的备用设置页：
 
 1. 打开 `chrome://extensions/`。
 2. 找到 Knovana。

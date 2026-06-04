@@ -15,28 +15,22 @@
 </script>
 
 {#if pending}
-  <section
-    class="border-b border-[color:var(--kn-border)] bg-[color:var(--kn-bg-raised)] px-3 py-3"
-  >
-    <div class="flex items-start justify-between gap-3">
-      <div class="min-w-0">
-        <div class="mb-1 flex items-center gap-2">
+  <section class="capture-preview">
+    <div class="capture-top">
+      <div class="capture-copy">
+        <div class="capture-meta">
           <StatusPill tone={running ? 'warning' : path ? 'accent' : 'neutral'}>
             {running ? '处理中' : path ? '已保存' : '待处理'}
           </StatusPill>
-          <span class="text-[12px] font-semibold text-[color:var(--kn-text)]"
-            >{actionLabel(pending.action)}</span
-          >
+          <span>{actionLabel(pending.action)}</span>
         </div>
-        <p class="truncate text-[12px] text-[color:var(--kn-text-muted)]">
-          {pending.context.pageTitle}
-        </p>
+        <p>{pending.context.pageTitle}</p>
       </div>
 
-      <div class="flex shrink-0 items-center gap-1">
+      <div class="capture-actions">
         <button
           type="button"
-          class="grid h-8 w-8 place-items-center rounded-[7px] text-[color:var(--kn-text-muted)] transition hover:bg-[color:var(--kn-bg-subtle)] hover:text-[color:var(--kn-primary)] disabled:opacity-45"
+          class="capture-action"
           title="执行"
           disabled={running}
           onclick={onRun}
@@ -47,32 +41,21 @@
             <Play size={15} />
           {/if}
         </button>
-        <button
-          type="button"
-          class="grid h-8 w-8 place-items-center rounded-[7px] text-[color:var(--kn-text-muted)] transition hover:bg-[color:var(--kn-bg-subtle)] hover:text-[color:var(--kn-danger)]"
-          title="关闭"
-          onclick={onClear}
-        >
+        <button type="button" class="capture-action danger" title="关闭" onclick={onClear}>
           <X size={15} />
         </button>
       </div>
     </div>
 
     {#if pending.context.selectedText}
-      <div
-        class="mt-3 max-h-20 overflow-hidden rounded-[8px] border border-[color:var(--kn-border)] bg-[color:var(--kn-bg)] px-3 py-2 text-[12px] leading-5 text-[color:var(--kn-text-muted)]"
-      >
+      <div class="selection-preview">
         {pending.context.selectedText}
       </div>
     {/if}
 
     {#if output || running || error || path}
-      <div
-        class="mt-3 rounded-[8px] border border-[color:var(--kn-border)] bg-[color:var(--kn-bg)] p-3"
-      >
-        <div
-          class="mb-2 flex items-center gap-2 text-[12px] font-semibold text-[color:var(--kn-text-muted)]"
-        >
+      <div class="capture-result">
+        <div class="result-title">
           <FileText size={14} />
           处理结果
         </div>
@@ -89,9 +72,130 @@
           </div>
         {/if}
         {#if path}
-          <p class="mt-2 truncate text-[11px] text-[color:var(--kn-accent)]">{path}</p>
+          <p class="saved-path">{path}</p>
         {/if}
       </div>
     {/if}
   </section>
 {/if}
+
+<style>
+  .capture-preview {
+    border-bottom: 1px solid var(--kn-border);
+    background: color-mix(in srgb, var(--kn-bg-raised) 84%, var(--kn-bg));
+    padding: 12px;
+  }
+
+  .capture-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .capture-copy {
+    min-width: 0;
+  }
+
+  .capture-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 3px;
+  }
+
+  .capture-meta span:last-child {
+    color: var(--kn-text);
+    font-size: 12px;
+    font-weight: 800;
+  }
+
+  .capture-copy p {
+    margin: 0;
+    overflow: hidden;
+    color: var(--kn-text-muted);
+    font-size: 12px;
+    line-height: 1.45;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .capture-actions {
+    display: flex;
+    flex: 0 0 auto;
+    gap: 4px;
+  }
+
+  .capture-action {
+    display: grid;
+    width: 31px;
+    height: 31px;
+    place-items: center;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--kn-text-muted);
+    transition:
+      background 150ms ease,
+      color 150ms ease;
+  }
+
+  .capture-action:hover {
+    background: var(--kn-primary-soft);
+    color: var(--kn-primary);
+  }
+
+  .capture-action.danger:hover {
+    background: color-mix(in srgb, var(--kn-danger) 10%, transparent);
+    color: var(--kn-danger);
+  }
+
+  .capture-action:disabled {
+    cursor: not-allowed;
+    opacity: 0.46;
+  }
+
+  .selection-preview {
+    display: -webkit-box;
+    max-height: 76px;
+    margin-top: 10px;
+    overflow: hidden;
+    border: 1px solid var(--kn-border);
+    border-radius: 8px;
+    background: var(--kn-field-bg);
+    color: var(--kn-text-muted);
+    font-size: 12px;
+    line-height: 1.6;
+    padding: 9px 10px;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+  }
+
+  .capture-result {
+    margin-top: 10px;
+    border: 1px solid var(--kn-border);
+    border-radius: 8px;
+    background: var(--kn-field-bg);
+    padding: 10px;
+  }
+
+  .result-title {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin-bottom: 8px;
+    color: var(--kn-text-muted);
+    font-size: 12px;
+    font-weight: 800;
+  }
+
+  .saved-path {
+    margin: 8px 0 0;
+    overflow: hidden;
+    color: var(--kn-accent);
+    font-size: 11px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+</style>

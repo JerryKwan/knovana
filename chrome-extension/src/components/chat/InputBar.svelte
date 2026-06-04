@@ -24,34 +24,28 @@
   }
 </script>
 
-<div class="border-t border-[color:var(--kn-border)] bg-[color:var(--kn-bg-raised)] px-3 pb-3 pt-2">
-  <div class="mb-2 flex gap-2 overflow-x-auto kn-scrollbar">
+<div class="composer">
+  <div class="suggestion-strip">
     {#each suggestions as suggestion (suggestion)}
-      <button
-        type="button"
-        class="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-[color:var(--kn-border)] bg-[color:var(--kn-bg)] px-3 text-[12px] font-semibold text-[color:var(--kn-text-muted)] transition hover:border-[color:var(--kn-primary)] hover:text-[color:var(--kn-primary)]"
-        onclick={() => onSuggestion(suggestion)}
-      >
+      <button type="button" class="suggestion" onclick={() => onSuggestion(suggestion)}>
         <Sparkles size={13} />
         {suggestion}
       </button>
     {/each}
   </div>
 
-  <div
-    class="flex min-h-[74px] items-end gap-2 rounded-[8px] border border-[color:var(--kn-border)] bg-[color:var(--kn-bg)] p-2 shadow-soft"
-  >
+  <div class="input-shell">
     <textarea
       bind:value
       {disabled}
       rows="2"
-      class="max-h-32 min-h-12 flex-1 resize-none border-0 bg-transparent px-1 py-1 text-[13px] leading-5 text-[color:var(--kn-text)] outline-none placeholder:text-[color:var(--kn-text-muted)] disabled:opacity-60"
+      class="message-input"
       placeholder="向 Knovana 提问..."
       onkeydown={handleKeydown}
     ></textarea>
     <button
       type="button"
-      class="grid h-10 w-10 shrink-0 place-items-center rounded-[8px] bg-[color:var(--kn-primary)] text-[color:var(--kn-primary-ink)] transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-45"
+      class="send-button"
       disabled={disabled || !value.trim()}
       title="发送"
       onclick={submit}
@@ -60,3 +54,129 @@
     </button>
   </div>
 </div>
+
+<style>
+  .composer {
+    border-top: 1px solid var(--kn-border);
+    background:
+      linear-gradient(180deg, rgb(255 255 255 / 0.78), rgb(255 255 255 / 0.94)), var(--kn-bg-raised);
+    padding: 9px 12px 12px;
+  }
+
+  :global(:root[data-theme='dark']) .composer {
+    background:
+      linear-gradient(180deg, rgb(22 32 30 / 0.72), rgb(22 32 30 / 0.94)), var(--kn-bg-raised);
+  }
+
+  .suggestion-strip {
+    display: flex;
+    gap: 7px;
+    margin-bottom: 8px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .suggestion-strip::-webkit-scrollbar {
+    display: none;
+  }
+
+  .suggestion {
+    display: inline-flex;
+    height: 30px;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 5px;
+    border: 1px solid var(--kn-border);
+    border-radius: 8px;
+    background: var(--kn-field-bg);
+    color: var(--kn-text-muted);
+    padding: 0 10px;
+    font-size: 12px;
+    font-weight: 800;
+    transition:
+      border-color 150ms ease,
+      background 150ms ease,
+      color 150ms ease;
+  }
+
+  .suggestion:hover {
+    border-color: color-mix(in srgb, var(--kn-primary) 34%, var(--kn-border));
+    background: var(--kn-primary-soft);
+    color: var(--kn-primary);
+  }
+
+  .input-shell {
+    display: flex;
+    min-height: 74px;
+    align-items: flex-end;
+    gap: 9px;
+    border: 1px solid var(--kn-border-strong);
+    border-radius: 8px;
+    background: var(--kn-field-bg);
+    padding: 8px;
+    box-shadow: var(--kn-shadow-soft);
+  }
+
+  .input-shell:focus-within {
+    border-color: color-mix(in srgb, var(--kn-primary) 48%, var(--kn-border));
+    box-shadow:
+      0 0 0 3px color-mix(in srgb, var(--kn-primary) 12%, transparent),
+      var(--kn-shadow-soft);
+  }
+
+  .message-input {
+    min-height: 50px;
+    max-height: 128px;
+    min-width: 0;
+    flex: 1;
+    resize: none;
+    border: 0;
+    background: transparent;
+    color: var(--kn-text);
+    padding: 4px 3px;
+    font-size: 13px;
+    line-height: 1.55;
+    outline: none;
+  }
+
+  .message-input::placeholder {
+    color: var(--kn-text-muted);
+  }
+
+  .message-input:disabled {
+    opacity: 0.56;
+  }
+
+  .send-button {
+    display: grid;
+    width: 40px;
+    height: 40px;
+    flex: 0 0 auto;
+    place-items: center;
+    border: 0;
+    border-radius: 8px;
+    background: linear-gradient(
+      135deg,
+      var(--kn-primary),
+      color-mix(in srgb, var(--kn-primary) 70%, var(--kn-accent))
+    );
+    color: var(--kn-primary-ink);
+    box-shadow: 0 10px 20px color-mix(in srgb, var(--kn-primary) 24%, transparent);
+    transition:
+      transform 150ms ease,
+      opacity 150ms ease,
+      filter 150ms ease;
+  }
+
+  .send-button:hover {
+    filter: brightness(1.04);
+    transform: translateY(-1px);
+  }
+
+  .send-button:disabled {
+    cursor: not-allowed;
+    filter: grayscale(0.18);
+    opacity: 0.42;
+    transform: none;
+  }
+</style>

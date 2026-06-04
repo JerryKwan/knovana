@@ -1,0 +1,75 @@
+# OS and editor files
+.DS_Store
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.pem
+*.key
+*.p12
+
+# Logs and temporary files
+*.log
+logs/
+tmp/
+temp/
+*.tmp
+
+# Frontend / Chrome extension
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+dist/
+build/
+out/
+.output/
+.vite/
+.parcel-cache/
+.turbo/
+.svelte-kit/
+storybook-static/
+coverage/
+
+# Chrome extension packages and generated artifacts
+*.crx
+*.zip
+web-ext-artifacts/
+.plasmo/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.python-version
+
+.venv/
+venv/
+env/
+ENV/
+
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+
+pip-wheel-metadata/
+*.egg-info/
+.eggs/
+dist/
+build/
