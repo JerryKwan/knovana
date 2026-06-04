@@ -17,9 +17,9 @@
   {#if messages.length === 0}
     <div class="empty-chat">
       <div class="empty-inner">
-        <BrandMark size={42} />
-        <h2>网页学识整理</h2>
-        <p>在此开启深度对话，提取出的选区、总结与笔记也会自动汇入这里。</p>
+        <BrandMark size={44} />
+        <h2>让每一次阅读在此沉淀</h2>
+        <p>打捞喧嚣世界的碎片，筑起属于你的思想灯塔</p>
       </div>
     </div>
   {:else}
@@ -93,23 +93,37 @@
 
   .empty-inner {
     display: grid;
-    max-width: 260px;
+    max-width: 300px;
     justify-items: center;
+    animation: fadeInUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   }
 
   .empty-inner h2 {
-    margin: 14px 0 0;
-    font-size: 16px;
-    font-weight: 700;
-    line-height: 1.35;
+    margin: 16px 0 8px;
+    font-size: 15px;
+    font-weight: 500;
+    line-height: 1.4;
     color: var(--kn-text);
+    letter-spacing: 0.04em;
   }
 
   .empty-inner p {
-    margin: 8px 0 0;
+    margin: 0;
     color: var(--kn-text-muted);
     font-size: 12.5px;
     line-height: 1.6;
+    letter-spacing: 0.02em;
+  }
+
+  @keyframes fadeInUp {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
 
   .message-list {
