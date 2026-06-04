@@ -4,85 +4,97 @@
 
 :root {
   color-scheme: light;
-  --kn-bg: #f3f7f6;
-  --kn-bg-raised: #ffffff;
-  --kn-bg-subtle: #eaf1ef;
-  --kn-field-bg: #f8fbfa;
-  --kn-text: #15211f;
-  --kn-text-muted: #687873;
-  --kn-border: #d8e3e0;
-  --kn-border-strong: #c5d3cf;
-  --kn-primary: #2f63d6;
-  --kn-primary-ink: #ffffff;
-  --kn-primary-soft: #e7efff;
-  --kn-accent: #0a967f;
-  --kn-warning: #a76100;
-  --kn-danger: #b63e3e;
-  --kn-shadow-panel: 0 22px 58px rgb(21 39 37 / 0.16);
-  --kn-shadow-soft: 0 10px 24px rgb(21 39 37 / 0.08);
+
+  /* ── Warm Paper Palette ────────────────────────────────────────── */
+  --kn-bg: #faf8f4;
+  --kn-bg-raised: #fdfcf9;
+  --kn-bg-subtle: #f2efe8;
+  --kn-field-bg: #f7f4ed;
+  --kn-text: #2c2825;
+  --kn-text-muted: #8a7f72;
+
+  /* Borders */
+  --kn-border: #ddd8d0;
+  --kn-border-strong: #ccc7be;
+
+  /* Functional */
+  --kn-primary: #3c342f;
+  --kn-primary-ink: #faf8f4;
+  --kn-primary-soft: #f0e9df;
+  --kn-accent: #a08470;
+  --kn-warning: #8b6914;
+  --kn-danger: #b94a4a;
+
+  --kn-shadow-panel: 0 18px 48px rgb(44 40 37 / 0.1);
+  --kn-shadow-soft: 0 6px 18px rgb(44 40 37 / 0.06);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
     color-scheme: dark;
-    --kn-bg: #0e1513;
-    --kn-bg-raised: #17201e;
-    --kn-bg-subtle: #202d2a;
-    --kn-field-bg: #121b19;
-    --kn-text: #eef5f2;
-    --kn-text-muted: #9cada8;
-    --kn-border: #2b3a36;
-    --kn-border-strong: #40504b;
-    --kn-primary: #8fb0ff;
-    --kn-primary-ink: #0f1519;
-    --kn-primary-soft: #1d2b45;
-    --kn-accent: #55d0bc;
-    --kn-warning: #f0b463;
-    --kn-danger: #ff9292;
-    --kn-shadow-panel: 0 22px 58px rgb(0 0 0 / 0.34);
-    --kn-shadow-soft: 0 10px 24px rgb(0 0 0 / 0.24);
+    --kn-bg: #181512;
+    --kn-bg-raised: #201c18;
+    --kn-bg-subtle: #272320;
+    --kn-field-bg: #1d1916;
+    --kn-text: #e8e0d8;
+    --kn-text-muted: #8e8279;
+
+    --kn-border: #352f29;
+    --kn-border-strong: #4a433c;
+
+    --kn-primary: #ebdcd0;
+    --kn-primary-ink: #181512;
+    --kn-primary-soft: rgba(235, 220, 208, 0.12);
+    --kn-accent: #b09988;
+    --kn-warning: #d4a855;
+    --kn-danger: #d47a7a;
+
+    --kn-shadow-panel: 0 18px 48px rgb(0 0 0 / 0.36);
+    --kn-shadow-soft: 0 6px 18px rgb(0 0 0 / 0.22);
   }
 }
 
 :root[data-theme='light'] {
   color-scheme: light;
-  --kn-bg: #f3f7f6;
-  --kn-bg-raised: #ffffff;
-  --kn-bg-subtle: #eaf1ef;
-  --kn-field-bg: #f8fbfa;
-  --kn-text: #15211f;
-  --kn-text-muted: #687873;
-  --kn-border: #d8e3e0;
-  --kn-border-strong: #c5d3cf;
-  --kn-primary: #2f63d6;
-  --kn-primary-ink: #ffffff;
-  --kn-primary-soft: #e7efff;
-  --kn-accent: #0a967f;
-  --kn-warning: #a76100;
-  --kn-danger: #b63e3e;
-  --kn-shadow-panel: 0 22px 58px rgb(21 39 37 / 0.16);
-  --kn-shadow-soft: 0 10px 24px rgb(21 39 37 / 0.08);
+  --kn-bg: #faf8f4;
+  --kn-bg-raised: #fdfcf9;
+  --kn-bg-subtle: #f2efe8;
+  --kn-field-bg: #f7f4ed;
+  --kn-text: #2c2825;
+  --kn-text-muted: #8a7f72;
+  --kn-border: #ddd8d0;
+  --kn-border-strong: #ccc7be;
+  --kn-primary: #3c342f;
+  --kn-primary-ink: #faf8f4;
+  --kn-primary-soft: #f0e9df;
+  --kn-accent: #a08470;
+  --kn-warning: #8b6914;
+  --kn-danger: #b94a4a;
+  --kn-shadow-panel: 0 18px 48px rgb(44 40 37 / 0.1);
+  --kn-shadow-soft: 0 6px 18px rgb(44 40 37 / 0.06);
 }
 
 :root[data-theme='dark'] {
   color-scheme: dark;
-  --kn-bg: #0e1513;
-  --kn-bg-raised: #17201e;
-  --kn-bg-subtle: #202d2a;
-  --kn-field-bg: #121b19;
-  --kn-text: #eef5f2;
-  --kn-text-muted: #9cada8;
-  --kn-border: #2b3a36;
-  --kn-border-strong: #40504b;
-  --kn-primary: #8fb0ff;
-  --kn-primary-ink: #0f1519;
-  --kn-primary-soft: #1d2b45;
-  --kn-accent: #55d0bc;
-  --kn-warning: #f0b463;
-  --kn-danger: #ff9292;
-  --kn-shadow-panel: 0 22px 58px rgb(0 0 0 / 0.34);
-  --kn-shadow-soft: 0 10px 24px rgb(0 0 0 / 0.24);
+  --kn-bg: #181512;
+  --kn-bg-raised: #201c18;
+  --kn-bg-subtle: #272320;
+  --kn-field-bg: #1d1916;
+  --kn-text: #e8e0d8;
+  --kn-text-muted: #8e8279;
+  --kn-border: #352f29;
+  --kn-border-strong: #4a433c;
+  --kn-primary: #ebdcd0;
+  --kn-primary-ink: #181512;
+  --kn-primary-soft: rgba(235, 220, 208, 0.12);
+  --kn-accent: #b09988;
+  --kn-warning: #d4a855;
+  --kn-danger: #d47a7a;
+  --kn-shadow-panel: 0 18px 48px rgb(0 0 0 / 0.36);
+  --kn-shadow-soft: 0 6px 18px rgb(0 0 0 / 0.22);
 }
+
+/* ── Base Reset ─────────────────────────────────────────────────── */
 
 html,
 body,
@@ -94,11 +106,15 @@ body,
 }
 
 body {
-  background: linear-gradient(180deg, var(--kn-bg), color-mix(in srgb, var(--kn-bg) 94%, #000 6%));
+  background: linear-gradient(180deg, var(--kn-bg), color-mix(in srgb, var(--kn-bg) 92%, #000 8%));
   color: var(--kn-text);
-  font-family: 'Aptos', 'Segoe UI', ui-sans-serif, system-ui, sans-serif;
-  letter-spacing: 0;
+  font-family: 'Aptos', 'Inter', 'Segoe UI', ui-sans-serif, system-ui, sans-serif;
+  font-size: 13.5px;
+  line-height: 1.6;
+  letter-spacing: -0.008em;
   text-rendering: geometricPrecision;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 button,
@@ -108,11 +124,13 @@ select {
   font: inherit;
 }
 
+/* ── Focus ───────────────────────────────────────────────────────── */
+
 button:focus-visible,
 input:focus-visible,
 textarea:focus-visible,
 select:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--kn-primary) 78%, white 22%);
+  outline: 2px solid color-mix(in srgb, var(--kn-primary) 70%, transparent);
   outline-offset: 2px;
 }
 
@@ -120,22 +138,35 @@ select:focus-visible {
   box-sizing: border-box;
 }
 
+/* ── Selection ───────────────────────────────────────────────────── */
+
+::selection {
+  background: color-mix(in srgb, var(--kn-primary) 20%, transparent);
+}
+
+/* ── Scrollbar ───────────────────────────────────────────────────── */
+
 .kn-scrollbar {
   scrollbar-width: thin;
-  scrollbar-color: color-mix(in srgb, var(--kn-text-muted) 48%, transparent) transparent;
+  scrollbar-color: color-mix(in srgb, var(--kn-text-muted) 35%, transparent) transparent;
 }
 
 .kn-scrollbar::-webkit-scrollbar {
-  width: 10px;
+  width: 7px;
+}
+
+.kn-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .kn-scrollbar::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--kn-text-muted) 34%, transparent);
-  border: 3px solid transparent;
+  background: color-mix(in srgb, var(--kn-text-muted) 28%, transparent);
   border-radius: 999px;
+  border: 2px solid transparent;
   background-clip: padding-box;
 }
 
-::selection {
-  background: color-mix(in srgb, var(--kn-primary) 22%, transparent);
+.kn-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--kn-text-muted) 44%, transparent);
+  background-clip: padding-box;
 }

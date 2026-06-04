@@ -22,9 +22,9 @@
           <StatusPill tone={running ? 'warning' : path ? 'accent' : 'neutral'}>
             {running ? '处理中' : path ? '已保存' : '待处理'}
           </StatusPill>
-          <span>{actionLabel(pending.action)}</span>
+          <span class="action-label">{actionLabel(pending.action)}</span>
         </div>
-        <p>{pending.context.pageTitle}</p>
+        <p class="page-title">{pending.context.pageTitle}</p>
       </div>
 
       <div class="capture-actions">
@@ -57,7 +57,7 @@
       <div class="capture-result">
         <div class="result-title">
           <FileText size={14} />
-          处理结果
+          <span>处理结果</span>
         </div>
         {#if error}
           <p class="text-[12px] leading-5 text-[color:var(--kn-danger)]">{error}</p>
@@ -82,7 +82,7 @@
 <style>
   .capture-preview {
     border-bottom: 1px solid var(--kn-border);
-    background: color-mix(in srgb, var(--kn-bg-raised) 84%, var(--kn-bg));
+    background: var(--kn-bg-raised);
     padding: 12px;
   }
 
@@ -104,13 +104,14 @@
     margin-bottom: 3px;
   }
 
-  .capture-meta span:last-child {
+  .action-label {
     color: var(--kn-text);
     font-size: 12px;
-    font-weight: 800;
+    font-weight: 600;
+    letter-spacing: 0.01em;
   }
 
-  .capture-copy p {
+  .page-title {
     margin: 0;
     overflow: hidden;
     color: var(--kn-text-muted);
@@ -123,36 +124,37 @@
   .capture-actions {
     display: flex;
     flex: 0 0 auto;
-    gap: 4px;
+    gap: 2px;
   }
 
   .capture-action {
     display: grid;
-    width: 31px;
-    height: 31px;
+    width: 30px;
+    height: 30px;
     place-items: center;
     border: 0;
     border-radius: 8px;
     background: transparent;
     color: var(--kn-text-muted);
+    cursor: pointer;
     transition:
-      background 150ms ease,
-      color 150ms ease;
+      background 160ms ease,
+      color 160ms ease;
   }
 
-  .capture-action:hover {
-    background: var(--kn-primary-soft);
-    color: var(--kn-primary);
+  .capture-action:hover:not(:disabled) {
+    background: var(--kn-bg-subtle);
+    color: var(--kn-text);
   }
 
-  .capture-action.danger:hover {
+  .capture-action.danger:hover:not(:disabled) {
     background: color-mix(in srgb, var(--kn-danger) 10%, transparent);
     color: var(--kn-danger);
   }
 
   .capture-action:disabled {
     cursor: not-allowed;
-    opacity: 0.46;
+    opacity: 0.4;
   }
 
   .selection-preview {
@@ -187,7 +189,8 @@
     margin-bottom: 8px;
     color: var(--kn-text-muted);
     font-size: 12px;
-    font-weight: 800;
+    font-weight: 600;
+    letter-spacing: 0.01em;
   }
 
   .saved-path {

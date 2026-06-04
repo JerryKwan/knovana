@@ -1,11 +1,12 @@
 <script lang="ts">
-  import { Bot, Copy, UserRound } from '@lucide/svelte';
+  import { Copy, RefreshCw } from '@lucide/svelte';
   import type { ChatMessage } from '../../types/chat';
   import BrandMark from '../common/BrandMark.svelte';
   import Markdown from '../common/Markdown.svelte';
 
   export let messages: ChatMessage[] = [];
   export let isStreaming = false;
+  export let onRegenerate: (index: number) => void = () => undefined;
 
   async function copyMessage(content: string) {
     await navigator.clipboard.writeText(content);
@@ -16,33 +17,28 @@
   {#if messages.length === 0}
     <div class="empty-chat">
       <div class="empty-inner">
-        <BrandMark size={46} />
-        <h2>准备处理当前页面</h2>
-        <p>对话、选区和右键动作会汇入这里。</p>
+        <BrandMark size={42} />
+        <h2>网页学识整理</h2>
+        <p>在此开启深度对话，提取出的选区、总结与笔记也会自动汇入这里。</p>
       </div>
     </div>
   {:else}
     <div class="message-list kn-scrollbar">
-      {#each messages as message (message.id)}
+      {#each messages as message, index (message.id)}
         <article class={`message ${message.role}`}>
-          <div class="avatar">
-            {#if message.role === 'assistant'}
-              <Bot size={16} />
-            {:else}
-              <UserRound size={15} />
-            {/if}
-          </div>
-
-          <div class="min-w-0 flex-1">
-            <div class="bubble">
-              {#if message.role === 'assistant'}
-                <Markdown content={message.content || (message.isStreaming ? '正在生成...' : '')} />
-              {:else}
-                <p class="whitespace-pre-wrap text-[13px] leading-6">{message.content}</p>
-              {/if}
+          {#if message.role === 'assistant'}
+            <div class="message-header">
+              <div class="avatar assistant">
+                <BrandMark size={13} />
+              </div>
+              <span class="sender-name">Knovana</span>
             </div>
 
-            {#if message.role === 'assistant' && message.content}
+            <div class="bubble">
+              <Markdown content={message.content || (message.isStreaming ? '正在生成...' : '')} />
+            </div>
+
+            {#if message.content}
               <div class="message-actions">
                 <button
                   type="button"
@@ -51,14 +47,35 @@
                   onclick={() => copyMessage(message.content)}
                 >
                   <Copy size={12} />
-                  复制
                 </button>
                 {#if message.isStreaming || isStreaming}
-                  <span>流式生成中</span>
+                  <span class="streaming-status">流式生成中</span>
                 {/if}
               </div>
             {/if}
-          </div>
+          {:else}
+            <div class="bubble">
+              <p class="whitespace-pre-wrap text-[13px] leading-6">{message.content}</p>
+            </div>
+            <div class="message-actions user-actions">
+              <button
+                type="button"
+                class="copy-button"
+                title="复制"
+                onclick={() => copyMessage(message.content)}
+              >
+                <Copy size={12} />
+              </button>
+              <button
+                type="button"
+                class="copy-button"
+                title="重新生成"
+                onclick={() => onRegenerate(index)}
+              >
+                <RefreshCw size={12} />
+              </button>
+            </div>
+          {/if}
         </article>
       {/each}
     </div>
@@ -70,7 +87,7 @@
     display: grid;
     flex: 1;
     place-items: center;
-    padding: 32px 26px;
+    padding: 32px 24px;
     text-align: center;
   }
 
@@ -81,95 +98,125 @@
   }
 
   .empty-inner h2 {
-    margin: 16px 0 0;
-    font-size: 18px;
-    font-weight: 850;
+    margin: 14px 0 0;
+    font-size: 16px;
+    font-weight: 700;
     line-height: 1.35;
+    color: var(--kn-text);
   }
 
   .empty-inner p {
     margin: 8px 0 0;
     color: var(--kn-text-muted);
-    font-size: 13px;
-    line-height: 1.65;
+    font-size: 12.5px;
+    line-height: 1.6;
   }
 
   .message-list {
     flex: 1;
     min-height: 0;
     overflow-y: auto;
-    padding: 14px 12px 18px;
+    padding: 16px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
   }
 
   .message {
     display: flex;
-    gap: 9px;
+    flex-direction: column;
+    width: 100%;
   }
 
-  .message + .message {
-    margin-top: 13px;
+  .message.user {
+    align-items: flex-end;
   }
 
-  .avatar {
+  .message.assistant {
+    align-items: flex-start;
+  }
+
+  .message-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 5px;
+  }
+
+  .avatar.assistant {
     display: grid;
-    width: 28px;
-    height: 28px;
-    flex: 0 0 auto;
+    width: 20px;
+    height: 20px;
     place-items: center;
-    border-radius: 8px;
-    margin-top: 2px;
-  }
-
-  .message.assistant .avatar {
-    background: color-mix(in srgb, var(--kn-primary-soft) 84%, transparent);
+    border-radius: 6px;
+    background: var(--kn-primary-soft);
     color: var(--kn-primary);
   }
 
-  .message.user .avatar {
-    background: color-mix(in srgb, var(--kn-accent) 12%, transparent);
-    color: var(--kn-accent);
+  .sender-name {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--kn-text-muted);
+    letter-spacing: 0.02em;
   }
 
   .bubble {
-    border: 1px solid var(--kn-border);
-    border-radius: 8px;
-    padding: 10px 12px;
-  }
-
-  .message.assistant .bubble {
-    border-color: var(--kn-border);
-    background: var(--kn-bg-raised);
+    max-width: 100%;
+    font-size: 13.5px;
+    line-height: 1.6;
   }
 
   .message.user .bubble {
-    border-color: color-mix(in srgb, var(--kn-accent) 28%, var(--kn-border));
-    background: color-mix(in srgb, var(--kn-accent) 8%, var(--kn-bg-raised));
+    background: var(--kn-bg-subtle);
+    border: 0;
+    border-radius: 14px 14px 2px 14px;
+    color: var(--kn-text);
+    padding: 8px 12px;
+    max-width: 85%;
+    word-break: break-word;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+  }
+
+  .message.assistant .bubble {
+    border: 0;
+    background: transparent;
+    padding: 0;
+    color: var(--kn-text);
+    width: 100%;
   }
 
   .message-actions {
     display: flex;
     align-items: center;
-    gap: 5px;
-    margin-top: 5px;
+    gap: 12px;
+    margin-top: 6px;
+    padding-left: 2px;
   }
 
-  .message-actions span {
+  .message-actions.user-actions {
+    justify-content: flex-end;
+    margin-top: 4px;
+    width: 100%;
+    padding-right: 2px;
+  }
+
+  .streaming-status {
     color: var(--kn-text-muted);
-    font-size: 11px;
+    font-size: 10.5px;
+    font-weight: 500;
   }
 
   .copy-button {
     display: inline-flex;
-    height: 27px;
+    width: 24px;
+    height: 24px;
     align-items: center;
-    gap: 5px;
+    justify-content: center;
     border: 0;
-    border-radius: 7px;
+    border-radius: 6px;
     background: transparent;
     color: var(--kn-text-muted);
-    padding: 0 7px;
-    font-size: 11px;
-    font-weight: 800;
+    cursor: pointer;
     transition:
       background 150ms ease,
       color 150ms ease;

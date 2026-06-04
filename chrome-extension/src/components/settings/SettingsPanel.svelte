@@ -1,7 +1,6 @@
 <script lang="ts">
   import {
     Check,
-    ChevronLeft,
     KeyRound,
     Link2,
     LoaderCircle,
@@ -9,12 +8,10 @@
     Moon,
     PlugZap,
     Save,
-    ShieldCheck,
     Sun,
     ToggleRight,
   } from '@lucide/svelte';
   import { onMount } from 'svelte';
-  import BrandMark from '../common/BrandMark.svelte';
   import {
     DEFAULT_SETTINGS,
     getSettings,
@@ -25,8 +22,8 @@
   import type { ExtensionSettings, ThemePreference } from '../../types/settings';
 
   export let variant: 'panel' | 'page' = 'panel';
-  export let onClose: (() => void) | undefined = undefined;
   export let onSaved: (settings: ExtensionSettings) => void = () => undefined;
+  export let onClose: () => void = () => undefined;
 
   let settings: ExtensionSettings = { ...DEFAULT_SETTINGS };
   let saved = false;
@@ -101,32 +98,10 @@
 </script>
 
 <section class={`settings-panel ${variant}`} aria-label="扩展设置" aria-busy={loading}>
-  <header class="settings-header">
-    <div class="settings-title-row">
-      {#if onClose}
-        <button type="button" class="icon-button" title="返回" onclick={onClose}>
-          <ChevronLeft size={18} />
-        </button>
-      {/if}
-
-      <div class="settings-title">
-        <BrandMark size={variant === 'page' ? 42 : 34} />
-        <div class="min-w-0">
-          <p>Knovana</p>
-          <h1>扩展设置</h1>
-        </div>
-      </div>
-
-      <div class="trust-badge" title="本地配置">
-        <ShieldCheck size={16} />
-      </div>
-    </div>
-  </header>
-
   <form class="settings-body kn-scrollbar" onsubmit={(event) => event.preventDefault()}>
-    <section class="settings-section">
+    <div class="settings-card">
       <div class="section-heading">
-        <span class="section-icon"><PlugZap size={17} /></span>
+        <span class="section-icon"><PlugZap size={16} /></span>
         <div>
           <h2>后端连接</h2>
           <p>API 地址和访问凭据</p>
@@ -135,7 +110,7 @@
 
       <label class="field">
         <span class="field-label">
-          <Link2 size={14} />
+          <Link2 size={13} />
           Backend URL
         </span>
         <input
@@ -149,7 +124,7 @@
 
       <label class="field">
         <span class="field-label">
-          <KeyRound size={14} />
+          <KeyRound size={13} />
           Access Token
         </span>
         <input
@@ -163,6 +138,12 @@
       </label>
 
       <div class="connection-row">
+        {#if checkMessage}
+          <span class={`connection-status ${checkTone}`}>
+            {checkTone === 'ok' ? '已连接' : checkMessage}
+          </span>
+        {/if}
+
         <button
           type="button"
           class="secondary-button"
@@ -170,25 +151,19 @@
           onclick={testConnection}
         >
           {#if checking}
-            <LoaderCircle size={15} class="spin" />
+            <LoaderCircle size={14} class="spin" />
             检测中
           {:else}
-            <PlugZap size={15} />
+            <PlugZap size={14} />
             测试连接
           {/if}
         </button>
-
-        {#if checkMessage}
-          <span class={`connection-status ${checkTone}`}>
-            {checkTone === 'ok' ? '已连接' : checkMessage}
-          </span>
-        {/if}
       </div>
-    </section>
+    </div>
 
-    <section class="settings-section">
+    <div class="settings-card">
       <div class="section-heading">
-        <span class="section-icon accent"><ToggleRight size={17} /></span>
+        <span class="section-icon accent"><ToggleRight size={16} /></span>
         <div>
           <h2>界面偏好</h2>
           <p>主题和侧栏行为</p>
@@ -208,11 +183,11 @@
               onclick={() => setTheme(theme.value)}
             >
               {#if theme.value === 'system'}
-                <Monitor size={14} />
+                <Monitor size={13} />
               {:else if theme.value === 'light'}
-                <Sun size={14} />
+                <Sun size={13} />
               {:else}
-                <Moon size={14} />
+                <Moon size={13} />
               {/if}
               {theme.label}
             </button>
@@ -220,29 +195,40 @@
         </div>
       </div>
 
-      <label class="toggle-row">
-        <span>
-          <strong>右键动作后打开侧栏</strong>
-          <small>保存、摘要和生成文档时自动展开</small>
-        </span>
-        <input
-          bind:checked={settings.autoOpenSidePanel}
-          type="checkbox"
-          aria-label="右键动作后打开侧栏"
-          disabled={loading}
-        />
-      </label>
-    </section>
+      <div class="field">
+        <span class="field-label">侧栏行为</span>
+        <label class="toggle-row">
+          <div class="toggle-info">
+            <strong>右键动作后打开侧栏</strong>
+            <small>保存、摘要和生成文档时自动展开</small>
+          </div>
+          <div class="switch">
+            <input
+              bind:checked={settings.autoOpenSidePanel}
+              type="checkbox"
+              aria-label="右键动作后打开侧栏"
+              disabled={loading}
+            />
+            <span class="slider"></span>
+          </div>
+        </label>
+      </div>
+    </div>
 
     <footer class="settings-footer">
       {#if saved}
         <span class="saved-note">
-          <Check size={14} />
+          <Check size={13} />
           已保存
         </span>
       {/if}
+      {#if variant === 'panel'}
+        <button type="button" class="secondary-button" disabled={loading} onclick={onClose}>
+          取消
+        </button>
+      {/if}
       <button type="button" class="primary-button" disabled={loading} onclick={save}>
-        <Save size={15} />
+        <Save size={14} />
         保存设置
       </button>
     </footer>
@@ -251,118 +237,55 @@
 
 <style>
   .settings-panel {
-    display: grid;
+    display: flex;
     min-height: 0;
+    flex-direction: column;
     color: var(--kn-text);
   }
 
   .settings-panel.panel {
     height: 100%;
-    grid-template-rows: auto minmax(0, 1fr);
     background: var(--kn-bg);
   }
 
   .settings-panel.page {
     min-height: min(760px, calc(100vh - 48px));
-    grid-template-rows: auto minmax(0, 1fr);
     overflow: hidden;
     border: 1px solid var(--kn-border);
-    border-radius: 8px;
+    border-radius: 12px;
     background: var(--kn-bg-raised);
     box-shadow: var(--kn-shadow-panel);
   }
 
-  .settings-header {
-    border-bottom: 1px solid var(--kn-border);
-    background:
-      linear-gradient(180deg, rgb(255 255 255 / 0.88), rgb(255 255 255 / 0.62)), var(--kn-bg-raised);
-    padding: 14px;
-  }
-
-  :global(:root[data-theme='dark']) .settings-header {
-    background:
-      linear-gradient(180deg, rgb(28 39 36 / 0.92), rgb(20 29 27 / 0.78)), var(--kn-bg-raised);
-  }
-
-  .settings-title-row,
-  .settings-title {
-    display: flex;
-    min-width: 0;
-    align-items: center;
-  }
-
-  .settings-title-row {
-    justify-content: space-between;
-    gap: 10px;
-  }
-
-  .settings-title {
-    gap: 10px;
-  }
-
-  .settings-title p {
-    margin: 0;
-    color: var(--kn-primary);
-    font-size: 11px;
-    font-weight: 800;
-    line-height: 1.2;
-  }
-
-  .settings-title h1 {
-    margin: 1px 0 0;
-    font-size: 20px;
-    font-weight: 800;
-    line-height: 1.2;
-  }
-
-  .icon-button,
-  .trust-badge {
-    display: grid;
-    width: 34px;
-    height: 34px;
-    flex: 0 0 auto;
-    place-items: center;
-    border-radius: 8px;
-  }
-
-  .icon-button {
-    border: 1px solid var(--kn-border);
-    background: var(--kn-bg-raised);
-    color: var(--kn-text-muted);
-    transition:
-      border-color 150ms ease,
-      color 150ms ease,
-      background 150ms ease;
-  }
-
-  .icon-button:hover {
-    border-color: color-mix(in srgb, var(--kn-primary) 38%, var(--kn-border));
-    background: var(--kn-primary-soft);
-    color: var(--kn-primary);
-  }
-
-  .trust-badge {
-    background: color-mix(in srgb, var(--kn-accent) 12%, transparent);
-    color: var(--kn-accent);
-  }
+  /* ── Body ────────────────────────────────────────────────────── */
 
   .settings-body {
     min-height: 0;
+    flex: 1;
     overflow-y: auto;
     padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
   }
 
   .settings-panel.page .settings-body {
-    padding: 18px;
+    padding: 20px;
+    gap: 16px;
   }
 
-  .settings-section {
-    border-bottom: 1px solid var(--kn-border);
-    padding: 0 0 18px;
+  /* ── Card Grouping ───────────────────────────────────────────── */
+
+  .settings-card {
+    background: var(--kn-bg-raised);
+    border: 1px solid var(--kn-border);
+    border-radius: 12px;
+    padding: 14px 16px 16px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
   }
 
-  .settings-section + .settings-section {
-    padding-top: 18px;
+  .settings-panel.page .settings-card {
+    padding: 18px 20px 20px;
   }
 
   .section-heading {
@@ -374,17 +297,18 @@
 
   .section-icon {
     display: grid;
-    width: 34px;
-    height: 34px;
+    width: 32px;
+    height: 32px;
     flex: 0 0 auto;
     place-items: center;
+    border: 0;
     border-radius: 8px;
     background: var(--kn-primary-soft);
     color: var(--kn-primary);
   }
 
   .section-icon.accent {
-    background: color-mix(in srgb, var(--kn-accent) 12%, transparent);
+    background: color-mix(in srgb, var(--kn-accent) 14%, transparent);
     color: var(--kn-accent);
   }
 
@@ -394,95 +318,111 @@
   }
 
   .section-heading h2 {
-    font-size: 15px;
-    font-weight: 800;
-    line-height: 1.25;
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: -0.005em;
+    line-height: 1.3;
   }
 
   .section-heading p {
-    margin-top: 2px;
+    margin-top: 1px;
     color: var(--kn-text-muted);
-    font-size: 12px;
+    font-size: 11.5px;
     line-height: 1.45;
+    font-weight: 500;
   }
+
+  /* ── Form Fields ─────────────────────────────────────────────── */
 
   .field {
     display: block;
-    margin-top: 12px;
+    margin-top: 11px;
   }
 
   .field-label {
     display: flex;
     align-items: center;
-    gap: 7px;
-    margin-bottom: 6px;
+    gap: 6px;
+    margin-bottom: 5px;
     color: var(--kn-text-muted);
-    font-size: 12px;
-    font-weight: 800;
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
   }
 
   .input-control {
     width: 100%;
-    height: 42px;
+    height: 40px;
     border: 1px solid var(--kn-border);
     border-radius: 8px;
     background: var(--kn-field-bg);
     color: var(--kn-text);
-    padding: 0 12px;
+    padding: 0 11px;
     font-size: 13px;
+    letter-spacing: 0.005em;
     outline: none;
     transition:
-      border-color 150ms ease,
-      box-shadow 150ms ease,
-      background 150ms ease;
+      border-color 160ms ease,
+      box-shadow 160ms ease,
+      background 160ms ease;
   }
 
   .input-control:focus {
-    border-color: color-mix(in srgb, var(--kn-primary) 52%, var(--kn-border));
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--kn-primary) 14%, transparent);
+    border-color: color-mix(in srgb, var(--kn-primary) 46%, var(--kn-border));
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--kn-primary) 10%, transparent);
   }
 
-  .connection-row,
-  .settings-footer {
+  /* ── Buttons ─────────────────────────────────────────────────── */
+
+  .connection-row {
     display: flex;
-    flex-wrap: wrap;
     align-items: center;
+    justify-content: flex-end;
     gap: 10px;
     margin-top: 14px;
   }
 
   .settings-footer {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
     justify-content: flex-end;
-    padding-top: 16px;
+    gap: 10px;
+    margin-top: 14px;
+    padding-top: 18px;
   }
 
   .secondary-button,
   .primary-button {
     display: inline-flex;
-    height: 38px;
+    height: 36px;
     align-items: center;
     justify-content: center;
-    gap: 7px;
+    gap: 6px;
     border-radius: 8px;
     font-size: 13px;
-    font-weight: 800;
+    font-weight: 600;
+    letter-spacing: 0.005em;
+    cursor: pointer;
     transition:
-      transform 150ms ease,
-      border-color 150ms ease,
-      background 150ms ease,
-      color 150ms ease;
+      transform 160ms ease,
+      border-color 160ms ease,
+      background 160ms ease,
+      color 160ms ease,
+      box-shadow 160ms ease;
   }
 
   .secondary-button {
     border: 1px solid var(--kn-border);
     background: var(--kn-bg-raised);
-    color: var(--kn-text);
-    padding: 0 12px;
+    color: var(--kn-primary);
+    padding: 0 14px;
   }
 
-  .secondary-button:hover {
-    border-color: color-mix(in srgb, var(--kn-primary) 38%, var(--kn-border));
-    color: var(--kn-primary);
+  .secondary-button:hover:not(:disabled) {
+    border-color: var(--kn-primary);
+    background: var(--kn-primary-soft);
   }
 
   .primary-button {
@@ -493,20 +433,23 @@
       color-mix(in srgb, var(--kn-primary) 72%, var(--kn-accent))
     );
     color: var(--kn-primary-ink);
-    padding: 0 15px;
-    box-shadow: 0 10px 22px color-mix(in srgb, var(--kn-primary) 24%, transparent);
+    padding: 0 18px;
+    box-shadow: 0 6px 16px color-mix(in srgb, var(--kn-primary) 20%, transparent);
   }
 
-  .primary-button:hover {
+  .primary-button:hover:not(:disabled) {
     transform: translateY(-1px);
+    box-shadow: 0 10px 22px color-mix(in srgb, var(--kn-primary) 26%, transparent);
   }
 
   .secondary-button:disabled,
   .primary-button:disabled {
     cursor: not-allowed;
-    opacity: 0.52;
+    opacity: 0.48;
     transform: none;
   }
+
+  /* ── Status ──────────────────────────────────────────────────── */
 
   .connection-status,
   .saved-note {
@@ -514,7 +457,8 @@
     align-items: center;
     gap: 5px;
     font-size: 12px;
-    font-weight: 800;
+    font-weight: 600;
+    letter-spacing: 0.01em;
   }
 
   .connection-status.ok,
@@ -526,12 +470,14 @@
     color: var(--kn-danger);
   }
 
+  /* ── Segmented Control ───────────────────────────────────────── */
+
   .segmented-control {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 4px;
     border: 1px solid var(--kn-border);
-    border-radius: 8px;
+    border-radius: 9px;
     background: var(--kn-field-bg);
     padding: 4px;
   }
@@ -548,29 +494,51 @@
     background: transparent;
     color: var(--kn-text-muted);
     font-size: 12px;
-    font-weight: 800;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    cursor: pointer;
     transition:
-      background 150ms ease,
-      color 150ms ease,
-      box-shadow 150ms ease;
+      background 160ms ease,
+      color 160ms ease,
+      box-shadow 160ms ease;
+  }
+
+  .segmented-control button:hover:not(.active):not(:disabled) {
+    background: var(--kn-bg-subtle);
+    color: var(--kn-text);
   }
 
   .segmented-control button.active {
     background: var(--kn-bg-raised);
     color: var(--kn-primary);
-    box-shadow: 0 5px 14px rgb(21 39 37 / 0.08);
+    box-shadow: 0 2px 8px color-mix(in srgb, var(--kn-text) 6%, transparent);
   }
+
+  .segmented-control button:disabled {
+    opacity: 0.5;
+  }
+
+  /* ── Toggle Row & Switch ─────────────────────────────────────── */
 
   .toggle-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    margin-top: 14px;
+    margin-top: 6px;
     border: 1px solid var(--kn-border);
-    border-radius: 8px;
+    border-radius: 9px;
     background: var(--kn-field-bg);
-    padding: 11px 12px;
+    padding: 12px 14px;
+    cursor: pointer;
+    transition:
+      border-color 160ms ease,
+      background 160ms ease;
+  }
+
+  .toggle-row:hover {
+    border-color: color-mix(in srgb, var(--kn-primary) 30%, var(--kn-border));
+    background: color-mix(in srgb, var(--kn-primary) 2%, var(--kn-field-bg));
   }
 
   .toggle-row strong,
@@ -580,21 +548,73 @@
 
   .toggle-row strong {
     font-size: 13px;
+    font-weight: 600;
     line-height: 1.4;
+    letter-spacing: -0.003em;
   }
 
   .toggle-row small {
     margin-top: 2px;
     color: var(--kn-text-muted);
-    font-size: 12px;
-    line-height: 1.35;
+    font-size: 11.5px;
+    line-height: 1.4;
   }
 
-  .toggle-row input {
-    width: 36px;
-    height: 20px;
+  .switch {
+    position: relative;
+    display: inline-block;
+    width: 40px;
+    height: 22px;
     flex: 0 0 auto;
-    accent-color: var(--kn-primary);
+  }
+
+  .switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+  }
+
+  .slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: var(--kn-border-strong);
+    transition: background-color 200ms ease;
+    border-radius: 22px;
+  }
+
+  .slider:before {
+    position: absolute;
+    content: '';
+    height: 16px;
+    width: 16px;
+    left: 3px;
+    bottom: 3px;
+    background-color: var(--kn-bg-raised);
+    transition: transform 200ms cubic-bezier(0.4, 0, 0.2, 1);
+    border-radius: 50%;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+  }
+
+  .switch input:checked + .slider {
+    background-color: var(--kn-primary);
+  }
+
+  .switch input:focus-visible + .slider {
+    outline: 2px solid color-mix(in srgb, var(--kn-primary) 70%, transparent);
+    outline-offset: 2px;
+  }
+
+  .switch input:checked + .slider:before {
+    transform: translateX(18px);
+  }
+
+  .switch input:disabled + .slider {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 
   .spin {

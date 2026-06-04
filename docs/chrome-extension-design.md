@@ -659,20 +659,20 @@ class KnovanaAPI {
 | **ChatGPT** | 会话管理 UI；快速操作按钮 |
 | **Notion Web Clipper** | 一键保存 + 标签选择 |
 
-### 9.2 配色
+### 9.2 配色与设计系统
 
+Knovana 已全面升级为**学术水墨暖纸风格**，详细规范请参阅独立的 [UI 设计系统与风格指南](file:///c:/Home/MyProjects/Knovana/docs/ui-style-guide.md)。
+
+核心浅色模式变量简述：
 ```css
 :root {
-  --kn-bg: #f3f7f6;
-  --kn-bg-raised: #ffffff;
-  --kn-bg-subtle: #eaf1ef;
-  --kn-field-bg: #f8fbfa;
-  --kn-text: #15211f;
-  --kn-text-muted: #687873;
-  --kn-border: #d8e3e0;
-  --kn-primary: #2f63d6;
-  --kn-primary-soft: #e7efff;
-  --kn-accent: #0a967f;
+  --kn-bg: #faf8f4;          /* 温暖乳白纸张底色 */
+  --kn-bg-raised: #fdfcf9;   /* 卡片背景 */
+  --kn-text: #2c2825;        /* 水墨深褐炭黑文字 */
+  --kn-border: #ddd8d0;      /* 模拟切边线 */
+  --kn-primary: #3c342f;     /* 水墨深褐主色 */
+  --kn-primary-soft: #f0e9df;/* 纸质软灰 */
+  --kn-accent: #a08470;      /* 陶土色 */
 }
 ```
 
@@ -680,7 +680,9 @@ class KnovanaAPI {
 
 ### 9.3 交互原则
 
-- **SSE 流式渲染**：所有 AI 操作流式输出，首 token ≤ 300ms 感知
-- **骨架屏**：加载状态使用骨架屏而非转圈
-- **上下文感知**：侧边栏自动识别当前页面并提供相关操作建议
-- **操作反馈**：保存成功 → Toast 提示 + 标签建议
+- **SSE 流式渲染**：所有 AI 操作流式输出，首 token ≤ 300ms 感知。
+- **骨架屏**：加载状态使用骨架屏而非转圈。
+- **上下文感知**：侧边栏自动识别当前页面并提供相关操作建议。
+- **极简化消息动作**：会话消息下方的操作按钮（如复制、重新生成）完全图标化，尺寸收窄为 `24x24px`，仅在鼠标悬停时浮现功能 Tooltip 提示，保持版面规整简洁。
+- **物理滑动反馈**：设置面板中的开关采用 iOS 胶囊样式的纯 CSS 滑块（Switch Toggle），替换原生 Checkbox，提供优秀的物理滑动动效。
+
