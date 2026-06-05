@@ -1010,6 +1010,40 @@ export const config = {
 }
 ```
 
+### 8.1 核心环境变量设置说明
+
+以下是 `Knovana` 后端系统两个关键安全配置环境变量的详细设置与配置指引：
+
+#### 1. `KNOVANA_JWT_SECRET` — JWT 签名秘钥
+* **用途**: 用于对用户身份认证 Token (JSON Web Token) 进行签名与校验，防止客户端篡改凭证。
+* **开发环境默认值**: `knovana-dev-local-secret-jwt-token-key-change-it`
+* **生产环境要求**: **必须**更改为一个高强度的随机密钥。切勿将开发密钥提交到生产配置文件中。
+* **推荐的密钥生成方式**:
+  在终端中运行以下命令生成一个强随机的 Base64 字符串：
+  ```bash
+  # 在任何支持 OpenSSL 的系统中运行：
+  openssl rand -base64 32
+  ```
+  将生成的输出值配置到 `.env` 中：
+  ```env
+  KNOVANA_JWT_SECRET=生成的超强密钥字符串
+  ```
+
+#### 2. `KNOVANA_CORS_ORIGINS` — 跨域源授权列表
+* **用途**: 控制哪些前端域名或客户端环境可以跨域发起 API 请求，确保接口不会被非法第三方网页调用。
+* **默认值**: `chrome-extension://*,http://localhost:*`
+* **配置格式**: 以英文逗号 `,` 分隔的多个域名模式。支持使用星号 `*` 通配符。
+* **具体配置场景**:
+  * **浏览器扩展**: Chrome Extension 发起请求时会携带形如 `chrome-extension://<EXTENSION_ID>` 的 Origin。开发阶段为了兼容临时打包的 ID，可以使用 `chrome-extension://*` 进行授权。在上线生产前，应明确指明真实的扩展 ID：
+    ```env
+    KNOVANA_CORS_ORIGINS=chrome-extension://pblgijpdkmclfdh...
+    ```
+  * **Web/移动端调试**: 如果需要允许本地前端页面跨域调试，可以在后面追加本地调试端口：
+    ```env
+    KNOVANA_CORS_ORIGINS=chrome-extension://真实ID,http://localhost:5173,http://127.0.0.1:5173
+    ```
+  * **通用说明**: 跨域过滤器会自动解析并使用正则模糊匹配带 `*` 通配符的域名（如 `http://localhost:*` 将自动允许本地任意端口的 Web 服务跨域调用）。
+
 ---
 
 ## 9. 部署

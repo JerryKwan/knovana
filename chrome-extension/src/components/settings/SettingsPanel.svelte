@@ -1,6 +1,8 @@
 <script lang="ts">
   import {
     Check,
+    Eye,
+    EyeOff,
     KeyRound,
     Link2,
     LoaderCircle,
@@ -32,6 +34,8 @@
   let checkMessage = '';
   let checkTone: 'neutral' | 'ok' | 'error' = 'neutral';
   let savedTimer: ReturnType<typeof setTimeout> | undefined;
+  let checkTimer: ReturnType<typeof setTimeout> | undefined;
+  let showToken = false;
 
   const themes: Array<{ value: ThemePreference; label: string }> = [
     { value: 'system', label: '跟随系统' },
@@ -43,6 +47,7 @@
     void load();
     return () => {
       if (savedTimer) clearTimeout(savedTimer);
+      if (checkTimer) clearTimeout(checkTimer);
     };
   });
 
@@ -78,6 +83,7 @@
     checking = true;
     checkMessage = '';
     checkTone = 'neutral';
+    if (checkTimer) clearTimeout(checkTimer);
 
     try {
       const headers = new Headers();
@@ -85,14 +91,34 @@
       const response = await fetch(`${normalizeBackendUrl(settings.backendUrl)}/knowledge/stats`, {
         headers,
       });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      checkMessage = '连接正常';
+      if (!response.ok) {
+        if (response.status === 401) {
+          throw new Error('未授权 (401)');
+        }
+        if (response.status === 403) {
+          throw new Error('拒绝访问 (403)');
+        }
+        if (response.status === 404) {
+          throw new Error('未找到服务 (404)');
+        }
+        throw new Error(`HTTP ${response.status}`);
+      }
+      checkMessage = '连接成功';
       checkTone = 'ok';
     } catch (error) {
-      checkMessage = error instanceof Error ? error.message : String(error);
+      const errMsg = error instanceof Error ? error.message : String(error);
+      if (errMsg.includes('Failed to fetch') || errMsg.includes('fetch failed')) {
+        checkMessage = '连接失败: 无法访问服务';
+      } else {
+        checkMessage = `连接失败: ${errMsg}`;
+      }
       checkTone = 'error';
     } finally {
       checking = false;
+      checkTimer = setTimeout(() => {
+        checkMessage = '';
+        checkTone = 'neutral';
+      }, 3000);
     }
   }
 </script>
@@ -111,36 +137,51 @@
       <label class="field">
         <span class="field-label">
           <Link2 size={13} />
-          Backend URL
+          API 地址
         </span>
         <input
           bind:value={settings.backendUrl}
           class="input-control"
           autocomplete="off"
           disabled={loading}
-          placeholder="http://localhost:8000/api"
+          placeholder="http://localhost:8000/api/v1"
         />
       </label>
 
       <label class="field">
         <span class="field-label">
           <KeyRound size={13} />
-          Access Token
+          访问凭据
         </span>
-        <input
-          bind:value={settings.token}
-          type="password"
-          class="input-control"
-          autocomplete="off"
-          disabled={loading}
-          placeholder="Bearer token"
-        />
+        <div class="input-wrapper">
+          <input
+            bind:value={settings.token}
+            type={showToken ? 'text' : 'password'}
+            class="input-control"
+            autocomplete="off"
+            disabled={loading}
+            placeholder="Bearer token"
+          />
+          <button
+            type="button"
+            class="visibility-toggle"
+            disabled={loading}
+            onclick={() => (showToken = !showToken)}
+            aria-label={showToken ? '隐藏凭据' : '显示凭据'}
+          >
+            {#if showToken}
+              <EyeOff size={16} />
+            {:else}
+              <Eye size={16} />
+            {/if}
+          </button>
+        </div>
       </label>
 
       <div class="connection-row">
         {#if checkMessage}
           <span class={`connection-status ${checkTone}`}>
-            {checkTone === 'ok' ? '已连接' : checkMessage}
+            {checkMessage}
           </span>
         {/if}
 
@@ -371,6 +412,48 @@
   .input-control:focus {
     border-color: color-mix(in srgb, var(--kn-primary) 46%, var(--kn-border));
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--kn-primary) 10%, transparent);
+  }
+
+  .input-wrapper {
+    position: relative;
+    width: 100%;
+    display: flex;
+    align-items: center;
+  }
+
+  .input-wrapper .input-control {
+    padding-right: 38px;
+  }
+
+  .visibility-toggle {
+    position: absolute;
+    right: 6px;
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border: 0;
+    background: transparent;
+    color: var(--kn-text-muted);
+    border-radius: 6px;
+    cursor: pointer;
+    outline: none;
+    transition:
+      color 160ms ease,
+      background-color 160ms ease;
+  }
+
+  .visibility-toggle:hover:not(:disabled) {
+    color: var(--kn-text);
+    background-color: var(--kn-bg-subtle);
+  }
+
+  .visibility-toggle:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
   }
 
   /* ── Buttons ─────────────────────────────────────────────────── */

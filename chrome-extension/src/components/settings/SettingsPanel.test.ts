@@ -31,10 +31,10 @@ describe('SettingsPanel', () => {
     const onSaved = vi.fn();
     render(SettingsPanel, { props: { onSaved } });
 
-    const backendInput = await screen.findByLabelText('Backend URL');
-    const tokenInput = screen.getByLabelText('Access Token');
+    const backendInput = await screen.findByLabelText('API 地址');
+    const tokenInput = screen.getByLabelText('访问凭据');
     await waitFor(() => {
-      expect((backendInput as HTMLInputElement).value).toBe('http://localhost:8000/api');
+      expect((backendInput as HTMLInputElement).value).toBe('http://localhost:8000/api/v1');
       expect((backendInput as HTMLInputElement).disabled).toBe(false);
     });
 
@@ -46,7 +46,7 @@ describe('SettingsPanel', () => {
 
     await waitFor(() =>
       expect(onSaved).toHaveBeenCalledWith({
-        backendUrl: 'http://127.0.0.1:8787/api',
+        backendUrl: 'http://127.0.0.1:8787/api/v1',
         token: 'test-token',
         theme: 'dark',
         autoOpenSidePanel: false,
@@ -61,10 +61,10 @@ describe('SettingsPanel', () => {
     vi.stubGlobal('fetch', fetchMock);
     render(SettingsPanel);
 
-    const backendInput = await screen.findByLabelText('Backend URL');
-    const tokenInput = screen.getByLabelText('Access Token');
+    const backendInput = await screen.findByLabelText('API 地址');
+    const tokenInput = screen.getByLabelText('访问凭据');
     await waitFor(() => {
-      expect((backendInput as HTMLInputElement).value).toBe('http://localhost:8000/api');
+      expect((backendInput as HTMLInputElement).value).toBe('http://localhost:8000/api/v1');
       expect((backendInput as HTMLInputElement).disabled).toBe(false);
     });
 
@@ -72,9 +72,9 @@ describe('SettingsPanel', () => {
     await fireEvent.input(tokenInput, { target: { value: 'abc' } });
     await fireEvent.click(screen.getByRole('button', { name: '测试连接' }));
 
-    await waitFor(() => expect(screen.getByText('已连接')).toBeTruthy());
+    await waitFor(() => expect(screen.getByText('连接成功')).toBeTruthy());
     expect(fetchMock).toHaveBeenCalledWith(
-      'http://localhost:9000/api/knowledge/stats',
+      'http://localhost:9000/api/v1/knowledge/stats',
       expect.objectContaining({
         headers: expect.any(Headers),
       }),

@@ -5,7 +5,7 @@ const SETTINGS_KEY = 'knovana.settings';
 const PENDING_ACTION_KEY = 'knovana.pendingAction';
 
 export const DEFAULT_SETTINGS: ExtensionSettings = {
-  backendUrl: 'http://localhost:8000/api',
+  backendUrl: 'http://localhost:8000/api/v1',
   token: '',
   theme: 'system',
   autoOpenSidePanel: true,
@@ -52,5 +52,11 @@ export async function consumePendingAction(): Promise<PendingAction | null> {
 
 export function normalizeBackendUrl(url: string): string {
   const trimmed = url.trim().replace(/\/+$/, '');
-  return trimmed.endsWith('/api') ? trimmed : `${trimmed}/api`;
+  if (trimmed.endsWith('/api/v1')) {
+    return trimmed;
+  }
+  if (trimmed.endsWith('/api')) {
+    return `${trimmed}/v1`;
+  }
+  return `${trimmed}/api/v1`;
 }

@@ -36,8 +36,13 @@ describe('storage service', () => {
   });
 
   it('normalizes backend URLs to the API root', () => {
-    expect(normalizeBackendUrl(' http://localhost:8000/ ')).toBe('http://localhost:8000/api');
-    expect(normalizeBackendUrl('https://api.knovana.com/api/')).toBe('https://api.knovana.com/api');
+    expect(normalizeBackendUrl(' http://localhost:8000/ ')).toBe('http://localhost:8000/api/v1');
+    expect(normalizeBackendUrl('https://api.knovana.com/api/')).toBe(
+      'https://api.knovana.com/api/v1',
+    );
+    expect(normalizeBackendUrl('https://api.knovana.com/api/v1/')).toBe(
+      'https://api.knovana.com/api/v1',
+    );
   });
 
   it('returns defaults when settings have not been saved', async () => {
@@ -53,7 +58,7 @@ describe('storage service', () => {
     });
 
     await expect(getSettings()).resolves.toEqual({
-      backendUrl: 'http://127.0.0.1:8787/api',
+      backendUrl: 'http://127.0.0.1:8787/api/v1',
       token: 'test-token',
       theme: 'dark',
       autoOpenSidePanel: false,
