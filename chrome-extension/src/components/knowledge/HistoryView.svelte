@@ -32,20 +32,31 @@
     }
   }
 
-  async function deleteSession(id: string, event: Event) {
-    event.stopPropagation(); // Prevent launching session on delete click
-    if (!confirm('确定要删除这个会话及其全部聊天记录吗？')) {
-      return;
-    }
+  let deletingSessionId: string | null = null;
+
+  function askDeleteSession(id: string, event: Event) {
+    event.stopPropagation();
+    deletingSessionId = id;
+  }
+
+  function cancelDelete(event: Event) {
+    event.stopPropagation();
+    deletingSessionId = null;
+  }
+
+  async function executeDelete(id: string, event: Event) {
+    event.stopPropagation();
     try {
       await sendRuntimeMessage({
         type: 'DELETE_SESSION',
         payload: { id },
       });
       dispatch('delete', { sessionId: id });
+      deletingSessionId = null;
       await loadSessions(page);
     } catch (err) {
-      alert(err instanceof Error ? err.message : String(err));
+      error = err instanceof Error ? err.message : String(err);
+      deletingSessionId = null;
     }
   }
 
@@ -125,29 +136,52 @@
               <!-- svelte-ignore a11y_no_noninteractive_element_to_interactive_role -->
               <article
                 class="session-card"
-                onclick={() => dispatch('select', { sessionId: session.id })}
+                class:confirming={deletingSessionId === session.id}
+                onclick={() =>
+                  deletingSessionId !== session.id && dispatch('select', { sessionId: session.id })}
                 onkeydown={(e) =>
-                  e.key === 'Enter' && dispatch('select', { sessionId: session.id })}
+                  e.key === 'Enter' &&
+                  deletingSessionId !== session.id &&
+                  dispatch('select', { sessionId: session.id })}
                 tabindex="0"
                 role="button"
               >
-                <div class="session-body">
-                  <h3 title={session.title}>{session.title || '无标题会话'}</h3>
-                  <div class="session-meta">
-                    <span class="message-count">{session.message_count || 0} 条消息</span>
-                    <span class="dot">•</span>
-                    <span class="active-time">{formatRelativeTime(session.updated_at)}</span>
+                {#if deletingSessionId === session.id}
+                  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+                  <div class="delete-confirm-box" onclick={(e) => e.stopPropagation()}>
+                    <span class="confirm-text">确定删除此会话吗？</span>
+                    <div class="confirm-actions">
+                      <button
+                        type="button"
+                        class="confirm-btn yes"
+                        onclick={(e) => executeDelete(session.id, e)}
+                      >
+                        确认
+                      </button>
+                      <button type="button" class="confirm-btn no" onclick={cancelDelete}>
+                        取消
+                      </button>
+                    </div>
                   </div>
-                </div>
+                {:else}
+                  <div class="session-body">
+                    <h3 title={session.title}>{session.title || '无标题会话'}</h3>
+                    <div class="session-meta">
+                      <span class="message-count">{session.message_count || 0} 条消息</span>
+                      <span class="dot">•</span>
+                      <span class="active-time">{formatRelativeTime(session.updated_at)}</span>
+                    </div>
+                  </div>
 
-                <button
-                  type="button"
-                  class="delete-btn"
-                  title="删除会话"
-                  onclick={(e) => deleteSession(session.id, e)}
-                >
-                  <Trash2 size={13} />
-                </button>
+                  <button
+                    type="button"
+                    class="delete-btn"
+                    title="删除会话"
+                    onclick={(e) => askDeleteSession(session.id, e)}
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                {/if}
               </article>
             {/each}
           </div>
@@ -298,6 +332,61 @@
     border-color: color-mix(in srgb, var(--kn-primary) 34%, var(--kn-border));
     box-shadow: var(--kn-shadow-soft);
     transform: translateY(-0.5px);
+  }
+
+  .session-card.confirming {
+    border-color: color-mix(in srgb, var(--kn-danger) 45%, var(--kn-border));
+    background: color-mix(in srgb, var(--kn-danger) 4%, var(--kn-bg-raised));
+    cursor: default;
+  }
+
+  .delete-confirm-box {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .confirm-text {
+    font-size: 11.5px;
+    font-weight: 700;
+    color: var(--kn-danger);
+  }
+
+  .confirm-actions {
+    display: flex;
+    gap: 6px;
+  }
+
+  .confirm-btn {
+    border: 0;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 4px 10px;
+    cursor: pointer;
+    transition:
+      background 150ms ease,
+      color 150ms ease;
+  }
+
+  .confirm-btn.yes {
+    background: var(--kn-danger);
+    color: #fff;
+  }
+
+  .confirm-btn.yes:hover {
+    background: color-mix(in srgb, var(--kn-danger) 85%, #000);
+  }
+
+  .confirm-btn.no {
+    background: var(--kn-border);
+    color: var(--kn-text);
+  }
+
+  .confirm-btn.no:hover {
+    background: color-mix(in srgb, var(--kn-border) 80%, #000);
   }
 
   .session-body {

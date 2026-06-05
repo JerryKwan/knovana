@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { IndexManager } from "../storage/knowledge/index";
 import { KnowledgeFileOps } from "../storage/knowledge/file-ops";
 import { KnovanaAgent } from "../agent/client";
-import { SEARCH_SYSTEM_PROMPT } from "../agent/prompts/search";
+import { SYSTEM_PROMPT } from "../agent/prompts/system-prompt";
 
 export class SearchService {
   private readonly indexMgr: IndexManager;
@@ -115,7 +115,7 @@ export class SearchService {
     const tempSessionId = `search_${randomUUID().replace(/-/g, "").slice(0, 12)}`;
     return agent.process(
       `在知识库中搜索并汇总与以下问题相关的知识: ${queryText}`,
-      SEARCH_SYSTEM_PROMPT,
+      SYSTEM_PROMPT,
       tempSessionId,
     );
   }

@@ -152,6 +152,10 @@ async function handleRuntimeMessage(message: RuntimeMessage): Promise<RuntimeRes
       void streamChat(message.requestId, message.payload);
       return okResponse({ requestId: message.requestId });
 
+    case 'REGENERATE_CHAT':
+      void streamRegenerate(message.requestId, message.payload);
+      return okResponse({ requestId: message.requestId });
+
     case 'START_CAPTURE':
       void streamCapture(message.requestId, message.payload);
       return okResponse({ requestId: message.requestId });
@@ -251,6 +255,58 @@ async function streamChat(requestId: string, payload: ChatRequestBody): Promise<
             });
           }
           // Skip other PSP events like message_start, content_block_start to avoid showing JSON in user bubble
+          return;
+        }
+      } else {
+        content = raw;
+      }
+      await sendStreamEvent({ requestId, stream: 'chat', status: 'chunk', content, sessionId });
+    });
+    await sendStreamEvent({ requestId, stream: 'chat', status: 'done' });
+  } catch (error) {
+    await sendStreamEvent({
+      requestId,
+      stream: 'chat',
+      status: 'error',
+      error: getErrorMessage(error),
+    });
+  }
+}
+
+async function streamRegenerate(requestId: string, payload: { session_id: string }): Promise<void> {
+  await sendStreamEvent({ requestId, stream: 'chat', status: 'start' });
+
+  try {
+    await apiStream('/chat/regenerate', payload, async ({ raw, json }) => {
+      let content: string;
+      let sessionId: string | undefined;
+      if (typeof json === 'object' && json !== null) {
+        const obj = json as Record<string, unknown>;
+        if ('error' in obj) {
+          const errObj = obj.error as Record<string, unknown> | undefined;
+          throw new Error(errObj?.message ? String(errObj.message) : 'Server streaming failed');
+        }
+
+        const sessionVal = obj.sessionId || obj.session_id;
+        if (sessionVal) {
+          sessionId = String(sessionVal);
+        }
+
+        const delta = obj.delta as Record<string, unknown> | undefined;
+        if (obj.type === 'content_block_delta' && delta?.type === 'text_delta') {
+          content = String(delta.text);
+        } else if ('content' in obj) {
+          content = String(obj.content);
+        } else {
+          if (sessionId) {
+            await sendStreamEvent({
+              requestId,
+              stream: 'chat',
+              status: 'chunk',
+              content: '',
+              sessionId,
+            });
+          }
           return;
         }
       } else {

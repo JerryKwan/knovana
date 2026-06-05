@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Copy, RefreshCw } from '@lucide/svelte';
+  import { Copy, RefreshCw, Download } from '@lucide/svelte';
   import { slide } from 'svelte/transition';
   import { SvelteSet } from 'svelte/reactivity';
   import type { ChatMessage } from '../../types/chat';
@@ -23,6 +23,15 @@
       }
     });
   }
+
+  $: lastUserMessageIndex = (() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === 'user') {
+        return i;
+      }
+    }
+    return -1;
+  })();
 
   function getBriefError(error: string): string {
     if (!error) return '';
@@ -56,6 +65,20 @@
 
   async function copyMessage(content: string) {
     await navigator.clipboard.writeText(content);
+  }
+
+  function exportMessage(role: 'user' | 'assistant', content: string) {
+    const isAssistant = role === 'assistant';
+    const filename = `${isAssistant ? 'assistant' : 'user'}-message-${Date.now()}.${isAssistant ? 'md' : 'txt'}`;
+    const blob = new Blob([content], { type: 'text/markdown;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', filename);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   }
 </script>
 
@@ -107,6 +130,14 @@
                 >
                   <Copy size={12} />
                 </button>
+                <button
+                  type="button"
+                  class="copy-button"
+                  title="导出"
+                  onclick={() => exportMessage(message.role, message.content)}
+                >
+                  <Download size={12} />
+                </button>
                 {#if message.isStreaming || isStreaming}
                   <span class="streaming-status">流式生成中</span>
                 {/if}
@@ -128,11 +159,21 @@
               <button
                 type="button"
                 class="copy-button"
-                title="重新生成"
-                onclick={() => onRegenerate(index)}
+                title="导出"
+                onclick={() => exportMessage(message.role, message.content)}
               >
-                <RefreshCw size={12} />
+                <Download size={12} />
               </button>
+              {#if index === lastUserMessageIndex}
+                <button
+                  type="button"
+                  class="copy-button"
+                  title="重新生成"
+                  onclick={() => onRegenerate(index)}
+                >
+                  <RefreshCw size={12} />
+                </button>
+              {/if}
             </div>
           {/if}
         </article>
@@ -222,7 +263,7 @@
     height: 20px;
     place-items: center;
     border-radius: 6px;
-    background: var(--kn-primary-soft);
+    background: transparent;
     color: var(--kn-primary);
   }
 
@@ -261,9 +302,17 @@
   .message-actions {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 6px;
     margin-top: 6px;
     padding-left: 2px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 150ms ease;
+  }
+
+  .message:hover .message-actions {
+    opacity: 1;
+    pointer-events: auto;
   }
 
   .message-actions.user-actions {

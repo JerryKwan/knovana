@@ -19,9 +19,12 @@ export interface ChatContext {
 }
 
 export interface ChatRequestBody {
-  messages: Array<{ role: 'user' | 'assistant'; content: string }>;
+  message: string;
   session_id?: string;
-  context?: ChatContext;
+}
+
+export interface RegenerateRequestBody {
+  session_id: string;
 }
 
 export interface ChatSessionSummary {

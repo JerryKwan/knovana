@@ -1,10 +1,11 @@
 import type { CaptureRequestBody, PendingAction } from './capture';
-import type { ApiStreamEvent, ChatRequestBody } from './api';
+import type { ApiStreamEvent, ChatRequestBody, RegenerateRequestBody } from './api';
 
 export type RuntimeMessage =
   | { type: 'GET_ACTIVE_CONTEXT' }
   | { type: 'CONSUME_PENDING_ACTION' }
   | { type: 'START_CHAT'; requestId: string; payload: ChatRequestBody }
+  | { type: 'REGENERATE_CHAT'; requestId: string; payload: RegenerateRequestBody }
   | { type: 'START_CAPTURE'; requestId: string; payload: CaptureRequestBody }
   | { type: 'GET_KNOWLEDGE'; payload?: { page?: number; tags?: string[]; query?: string } }
   | { type: 'GET_KNOWLEDGE_DETAIL'; payload: { id: string } }

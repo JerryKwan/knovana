@@ -110,6 +110,22 @@
     });
   }
 
+  function formatPromptWithContext(msg: string, context: PageSnapshot | null): string {
+    if (!context) return msg;
+    const parts: string[] = [];
+    if (context.pageUrl) {
+      parts.push(`【当前网页】: ${context.pageTitle || ''} (${context.pageUrl})`);
+    }
+    if (context.selectedText) {
+      parts.push(`【用户选中的文本】:\n${context.selectedText}`);
+    }
+    if (context.selectedImages && context.selectedImages.length > 0) {
+      const imgLinks = context.selectedImages.map((img) => img.src).join(', ');
+      parts.push(`【用户选中的图片】: ${imgLinks}`);
+    }
+    return parts.length > 0 ? `${parts.join('\n\n')}\n\n【用户指令】: ${msg}` : msg;
+  }
+
   async function sendChat(message: string) {
     const userMessage: ChatMessage = {
       id: crypto.randomUUID(),
@@ -129,28 +145,15 @@
     chatRequestId = crypto.randomUUID();
     chatRunning = true;
 
-    // We let the Claude Code agent create the session, so we do not pre-generate currentSessionId here.
-
-    const messagesHistory = messages.slice(0, -1).map((m) => ({
-      role: m.role as 'user' | 'assistant',
-      content: m.content,
-    }));
-
     const contextSource = pendingAction?.context ?? currentContext;
+    const formattedMessage = formatPromptWithContext(message, contextSource);
+
     await sendRuntimeMessage({
       type: 'START_CHAT',
       requestId: chatRequestId,
       payload: {
-        messages: messagesHistory,
+        message: formattedMessage,
         session_id: currentSessionId,
-        context: contextSource
-          ? {
-              page_url: contextSource.pageUrl,
-              page_title: contextSource.pageTitle,
-              selected_text: contextSource.selectedText,
-              selected_images: contextSource.selectedImages,
-            }
-          : undefined,
       },
     });
   }
@@ -287,11 +290,34 @@
     const userMsg = messages[index];
     if (!userMsg || userMsg.role !== 'user') return;
 
-    // Remove this user message and all subsequent messages
-    messages = messages.slice(0, index);
+    // We only support regenerating the last user message
+    if (index !== messages.length - 2) {
+      console.warn('Only regenerating the last user message is supported.');
+      return;
+    }
 
-    // Call sendChat to trigger regeneration
-    await sendChat(userMsg.content);
+    // Retain up to the user message
+    messages = messages.slice(0, index + 1);
+
+    const assistantMessage: ChatMessage = {
+      id: crypto.randomUUID(),
+      role: 'assistant',
+      content: '',
+      createdAt: Date.now(),
+      isStreaming: true,
+    };
+    messages = [...messages, assistantMessage];
+    activeAssistantId = assistantMessage.id;
+    chatRequestId = crypto.randomUUID();
+    chatRunning = true;
+
+    await sendRuntimeMessage({
+      type: 'REGENERATE_CHAT',
+      requestId: chatRequestId,
+      payload: {
+        session_id: currentSessionId!,
+      },
+    });
   }
 
   function startNewSession() {

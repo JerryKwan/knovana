@@ -1,53 +1,14 @@
 import { z } from "@hono/zod-openapi";
 
 export const ChatRequestSchema = z.object({
-  messages: z
-    .array(
-      z.object({
-        role: z.enum(["user", "assistant"]),
-        content: z.string(),
-      }),
-    )
-    .openapi({
-      description:
-        "完整的对话历史消息列表，包含最新的用户消息（多条则进行全量历史同步，单条且传了 session_id 则在 SQLite 历史基础上追加）",
-    }),
+  message: z.string().openapi({
+    description: "用户当前输入的消息内容",
+    example: "总结此页面",
+  }),
   session_id: z.string().optional().openapi({
     description: "历史会话 ID，如果不传则后端会自动创建并分配一个新会话",
     example: "sess_1234567890ab",
   }),
-  context: z
-    .object({
-      page_url: z.string().optional().openapi({
-        description: "来源网页 URL",
-        example: "https://blog.example.com/react-server-components",
-      }),
-      page_title: z.string().optional().openapi({
-        description: "来源网页标题",
-        example: "React Server Components deep dive",
-      }),
-      selected_text: z.string().optional().openapi({
-        description: "用户在网页中划选的文本片段",
-        example:
-          "Server Components allow developer to render components on server...",
-      }),
-      selected_images: z
-        .array(
-          z.object({
-            src: z.string().openapi({ description: "选中图片的 URL 地址" }),
-            alt: z.string().optional().openapi({ description: "图片替代说明" }),
-          }),
-        )
-        .optional()
-        .openapi({
-          description: "划选或保存的图片列表",
-        }),
-    })
-    .optional()
-    .openapi({
-      description:
-        "浏览器当前所在的页面上下文，AI 能够通过此上下文更智能地回答或整理内容",
-    }),
 });
 
 export const CreateSessionRequestSchema = z.object({

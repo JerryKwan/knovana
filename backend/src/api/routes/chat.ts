@@ -204,6 +204,46 @@ const deleteMessageRoute = createRoute({
   },
 });
 
+// 7. Regenerate turn response route
+const regenerateRoute = createRoute({
+  method: "post",
+  path: "/regenerate",
+  summary: "重新生成回答",
+  description: "重新生成指定会话中最后一条 Assistant 的回复。后端会自动清理 SQLite 中的最后一条回复，并裁剪 Claude Session Store 以便进行重新生成。",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            session_id: z.string().openapi({ description: "会话 ID", example: "sess_abc123" }),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: "SSE 事件流（Prism Stream Protocol v1 格式）",
+      headers: {
+        "Content-Type": {
+          schema: {
+            type: "string",
+          },
+          description: "text/event-stream",
+        },
+      },
+    },
+    401: {
+      content: {
+        "application/json": {
+          schema: ErrorResponseSchema,
+        },
+      },
+      description: "用户未认证",
+    },
+  },
+});
+
 // Implement handlers
 chatRoutes.openapi(chatStreamRoute, async (c) => {
   const input = c.req.valid("json");
@@ -229,6 +269,37 @@ chatRoutes.openapi(chatStreamRoute, async (c) => {
           error: {
             code: "INTERNAL_ERROR",
             message: err.message || "Streaming failed mid-turn",
+          },
+        }),
+      });
+    }
+  });
+});
+
+chatRoutes.openapi(regenerateRoute, async (c) => {
+  const { session_id } = c.req.valid("json");
+  const user = c.get("user");
+  const chatService = new ChatService(
+    user.id,
+    join(config.kbRoot, user.kb_path),
+  );
+
+  return streamSSE(c, async (stream) => {
+    try {
+      for await (const chunk of chatService.regenerate(session_id)) {
+        await stream.writeSSE({
+          event: chunk.event,
+          data: JSON.stringify(chunk.data),
+        });
+      }
+    } catch (err: any) {
+      console.error("[SSE Error] Regeneration failure:", err);
+      await stream.writeSSE({
+        event: "error",
+        data: JSON.stringify({
+          error: {
+            code: "INTERNAL_ERROR",
+            message: err.message || "Regeneration failed mid-turn",
           },
         }),
       });
