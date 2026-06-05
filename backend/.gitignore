@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+
+# Environments and secrets
+.env
+.env.*
+!.env.example
+
+# Local SQLite databases and data folder
+data/
+
+# User knowledge base and runtime assets
+knowledge-base/
+
+# Temporary and build outputs
+.tmp/
+dist/
+build/
+*.log
