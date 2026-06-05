@@ -110,22 +110,6 @@
     });
   }
 
-  function formatPromptWithContext(msg: string, context: PageSnapshot | null): string {
-    if (!context) return msg;
-    const parts: string[] = [];
-    if (context.pageUrl) {
-      parts.push(`【当前网页】: ${context.pageTitle || ''} (${context.pageUrl})`);
-    }
-    if (context.selectedText) {
-      parts.push(`【用户选中的文本】:\n${context.selectedText}`);
-    }
-    if (context.selectedImages && context.selectedImages.length > 0) {
-      const imgLinks = context.selectedImages.map((img) => img.src).join(', ');
-      parts.push(`【用户选中的图片】: ${imgLinks}`);
-    }
-    return parts.length > 0 ? `${parts.join('\n\n')}\n\n【用户指令】: ${msg}` : msg;
-  }
-
   async function sendChat(message: string) {
     const userMessage: ChatMessage = {
       id: crypto.randomUUID(),
@@ -145,14 +129,11 @@
     chatRequestId = crypto.randomUUID();
     chatRunning = true;
 
-    const contextSource = pendingAction?.context ?? currentContext;
-    const formattedMessage = formatPromptWithContext(message, contextSource);
-
     await sendRuntimeMessage({
       type: 'START_CHAT',
       requestId: chatRequestId,
       payload: {
-        message: formattedMessage,
+        message: message,
         session_id: currentSessionId,
       },
     });
