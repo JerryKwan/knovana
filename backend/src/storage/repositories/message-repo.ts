@@ -40,4 +40,16 @@ export class MessageRepository {
 
     return rows as unknown as ChatMessage[];
   }
+
+  deleteMessage(sessionId: string, messageId: string): void {
+    this.db
+      .prepare("DELETE FROM chat_messages WHERE session_id = ? AND id = ?")
+      .run(sessionId, messageId);
+  }
+
+  clearSessionMessages(sessionId: string): void {
+    this.db
+      .prepare("DELETE FROM chat_messages WHERE session_id = ?")
+      .run(sessionId);
+  }
 }

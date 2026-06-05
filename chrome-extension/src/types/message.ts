@@ -10,6 +10,10 @@ export type RuntimeMessage =
   | { type: 'GET_KNOWLEDGE_DETAIL'; payload: { id: string } }
   | { type: 'DELETE_KNOWLEDGE'; payload: { id: string } }
   | { type: 'SEARCH_KNOWLEDGE'; payload: { query: string } }
+  | { type: 'GET_SESSIONS'; payload?: { page?: number; per_page?: number } }
+  | { type: 'GET_SESSION_DETAIL'; payload: { id: string } }
+  | { type: 'DELETE_SESSION'; payload: { id: string } }
+  | { type: 'DELETE_MESSAGE'; payload: { sessionId: string; messageId: string } }
   | { type: 'OPEN_OPTIONS' }
   | { type: 'PENDING_ACTION'; payload: PendingAction }
   | { type: 'STREAM_EVENT'; payload: ApiStreamEvent };

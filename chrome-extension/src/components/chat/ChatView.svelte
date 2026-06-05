@@ -1,5 +1,7 @@
 <script lang="ts">
   import { Copy, RefreshCw } from '@lucide/svelte';
+  import { slide } from 'svelte/transition';
+  import { SvelteSet } from 'svelte/reactivity';
   import type { ChatMessage } from '../../types/chat';
   import BrandMark from '../common/BrandMark.svelte';
   import Markdown from '../common/Markdown.svelte';
@@ -7,6 +9,50 @@
   export let messages: ChatMessage[] = [];
   export let isStreaming = false;
   export let onRegenerate: (index: number) => void = () => undefined;
+
+  let hiddenErrors = new SvelteSet<string>();
+  let scheduledErrors = new SvelteSet<string>();
+
+  $: {
+    messages.forEach((message) => {
+      if (message.id && message.error && !scheduledErrors.has(message.id)) {
+        scheduledErrors.add(message.id);
+        setTimeout(() => {
+          hiddenErrors.add(message.id);
+        }, 5000);
+      }
+    });
+  }
+
+  function getBriefError(error: string): string {
+    if (!error) return '';
+    let cleanErr = error;
+    const prefixes = ['[SSE Error] Streaming failure: ', 'Error: ', 'ReferenceError: '];
+    for (const prefix of prefixes) {
+      if (cleanErr.startsWith(prefix)) {
+        cleanErr = cleanErr.slice(prefix.length);
+      }
+    }
+
+    // Extract first line
+    let firstLine = cleanErr.split('\n')[0].trim();
+
+    // Remove stack trace references
+    const atIndex = firstLine.indexOf('at ');
+    if (atIndex !== -1) {
+      firstLine = firstLine.substring(0, atIndex).trim();
+    }
+
+    // Simplify Windows paths (e.g. C:\foo\bar\claude.exe -> ...\claude.exe)
+    firstLine = firstLine.replace(/[a-zA-Z]:\\[^\s]*\\([^\s\\]+)/g, '...\\$1');
+    // Simplify Unix paths
+    firstLine = firstLine.replace(/\/([^\s/]+\/[^\s/]+)$/g, '.../$1');
+
+    if (firstLine.length > 90) {
+      return firstLine.substring(0, 87) + '...';
+    }
+    return firstLine;
+  }
 
   async function copyMessage(content: string) {
     await navigator.clipboard.writeText(content);
@@ -35,8 +81,21 @@
             </div>
 
             <div class="bubble">
-              <Markdown content={message.content || (message.isStreaming ? '正在生成...' : '')} />
+              <Markdown content={message.content} />
             </div>
+
+            <!-- Status Tail for Error / Streaming status -->
+            {#if message.error && !hiddenErrors.has(message.id)}
+              <div class="status-tail error" transition:slide|local={{ duration: 250 }}>
+                <span class="error-icon">⚠️</span>
+                <span class="error-msg">{getBriefError(message.error)}</span>
+              </div>
+            {:else if message.isStreaming && !message.content}
+              <div class="status-tail streaming">
+                <span class="pulse-dot"></span>
+                <span>Knovana Agent 正在思考并准备环境...</span>
+              </div>
+            {/if}
 
             {#if message.content}
               <div class="message-actions">
@@ -239,5 +298,48 @@
   .copy-button:hover {
     background: var(--kn-bg-subtle);
     color: var(--kn-text);
+  }
+
+  .status-tail {
+    display: flex;
+    align-items: center;
+    gap: 6.5px;
+    margin-top: 6px;
+    font-size: 11px;
+    font-weight: 500;
+  }
+
+  .status-tail.error {
+    color: var(--kn-danger);
+    background: color-mix(in srgb, var(--kn-danger) 8%, transparent);
+    border: 1px solid color-mix(in srgb, var(--kn-danger) 15%, transparent);
+    border-radius: 6px;
+    padding: 6px 10px;
+    word-break: break-all;
+    max-width: 95%;
+  }
+
+  .status-tail.streaming {
+    color: var(--kn-text-muted);
+  }
+
+  .pulse-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--kn-primary);
+    animation: pulse 1.2s infinite ease-in-out;
+  }
+
+  @keyframes pulse {
+    0%,
+    100% {
+      opacity: 0.3;
+      transform: scale(0.85);
+    }
+    50% {
+      opacity: 1;
+      transform: scale(1.1);
+    }
   }
 </style>

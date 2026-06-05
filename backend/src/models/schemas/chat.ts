@@ -1,10 +1,17 @@
 import { z } from "@hono/zod-openapi";
 
 export const ChatRequestSchema = z.object({
-  message: z.string().openapi({
-    description: "用户向 Agent 发送的聊天消息、提问或指令",
-    example: "请帮我总结当前这个网页的重点内容。",
-  }),
+  messages: z
+    .array(
+      z.object({
+        role: z.enum(["user", "assistant"]),
+        content: z.string(),
+      }),
+    )
+    .openapi({
+      description:
+        "完整的对话历史消息列表，包含最新的用户消息（多条则进行全量历史同步，单条且传了 session_id 则在 SQLite 历史基础上追加）",
+    }),
   session_id: z.string().optional().openapi({
     description: "历史会话 ID，如果不传则后端会自动创建并分配一个新会话",
     example: "sess_1234567890ab",
@@ -41,6 +48,25 @@ export const ChatRequestSchema = z.object({
       description:
         "浏览器当前所在的页面上下文，AI 能够通过此上下文更智能地回答或整理内容",
     }),
+});
+
+export const CreateSessionRequestSchema = z.object({
+  title: z
+    .string()
+    .optional()
+    .openapi({ description: "会话初始标题", example: "新网页对话" }),
+  context: z.any().optional().openapi({ description: "页面上下文" }),
+});
+
+export const CreateSessionResponseSchema = z.object({
+  id: z.string().openapi({ example: "sess_abc123" }),
+  title: z.string().nullable().openapi({ example: "新网页对话" }),
+  context: z
+    .string()
+    .nullable()
+    .openapi({ description: "JSON 序列化的页面上下文" }),
+  created_at: z.string().openapi({ example: "2024-12-01T14:30:00Z" }),
+  updated_at: z.string().openapi({ example: "2024-12-01T14:30:00Z" }),
 });
 
 export const ChatSessionListItemSchema = z.object({

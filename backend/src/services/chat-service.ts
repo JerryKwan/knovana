@@ -2,7 +2,9 @@ import { randomUUID } from "node:crypto";
 import { SessionRepository } from "../storage/repositories/session-repo";
 import { MessageRepository } from "../storage/repositories/message-repo";
 import { KnovanaAgent } from "../agent/client";
+import { SessionWarmPool } from "../agent/pool";
 import { CHAT_SYSTEM_PROMPT } from "../agent/prompts/chat";
+import { KnovanaSessionStore } from "../agent/session-store";
 import type {
   ChatSession,
   ChatSessionListItem,
@@ -10,8 +12,8 @@ import type {
 } from "../models/session";
 
 export interface ChatInput {
-  message: string;
-  sessionId?: string;
+  messages: { role: "user" | "assistant"; content: string }[];
+  session_id?: string;
   context?: {
     page_url?: string;
     page_title?: string;
@@ -34,37 +36,64 @@ export class ChatService {
    * Compiles the text response to log in SQLite once finished.
    */
   async *chat(input: ChatInput): AsyncGenerator<{ event: string; data: any }> {
-    const sessionId =
-      input.sessionId || `sess_${randomUUID().replace(/-/g, "").slice(0, 12)}`;
+    let sessionId = input.session_id;
 
-    // Create session if it is new
-    if (!input.sessionId) {
-      this.sessionRepo.create(sessionId, this.userId, input.context);
-      const title = input.message.slice(0, 50).trim() || "New Web Capture";
-      this.sessionRepo.updateTitle(sessionId, title);
-    } else {
-      this.sessionRepo.updateTimestamp(sessionId);
+    // Check if the session actually has entries in the session store to decide whether to resume
+    let shouldResume = false;
+    if (sessionId) {
+      const store = new KnovanaSessionStore(this.userId);
+      const entries = await store.load({ projectKey: this.userId, sessionId });
+      if (entries && entries.length > 0) {
+        shouldResume = true;
+      }
     }
 
-    // Save the user's message
-    this.messageRepo.create(sessionId, "user", input.message);
+    if (shouldResume && sessionId) {
+      // Ensure the session exists in SQLite before recording messages to avoid FOREIGN KEY errors
+      const session = this.sessionRepo.get(sessionId);
+      if (!session) {
+        this.sessionRepo.create(sessionId, this.userId, input.context);
+        const firstUserMsg = input.messages.find((m) => m.role === "user");
+        const title =
+          firstUserMsg?.content.slice(0, 50).trim() || "New Web Capture";
+        this.sessionRepo.updateTitle(sessionId, title);
+      } else {
+        this.sessionRepo.updateTimestamp(sessionId);
+      }
 
-    // Inject context into the user's instruction
-    const promptMessage = input.context
-      ? this.injectContext(input.message, input.context)
-      : input.message;
+      // Hybrid History Management
+      if (input.messages.length > 1) {
+        // Full sync mode: clear local SQLite history and overwrite
+        this.messageRepo.clearSessionMessages(sessionId);
+        for (const msg of input.messages) {
+          this.messageRepo.create(sessionId, msg.role, msg.content);
+        }
+      } else if (input.messages.length === 1) {
+        // Append mode: append the single message
+        const singleMsg = input.messages[0];
+        this.messageRepo.create(sessionId, singleMsg.role, singleMsg.content);
+      }
+    }
 
-    // Load past message history for context window
-    const history = this.messageRepo.listBySession(sessionId);
-    // Combine history messages into a single prompt context if the Agent loop needs it,
-    // or let the Agent handle current message with injected history context
-    const conversationPrompt = this.compileHistoryPrompt(
-      promptMessage,
-      history,
-    );
+    // Extract the latest user message
+    const lastUserMsg = input.messages[input.messages.length - 1];
+    if (!lastUserMsg || lastUserMsg.role !== "user") {
+      throw new Error(
+        "The last message in the input list must be a user message.",
+      );
+    }
+
+    // Inject page context if present
+    const conversationPrompt = input.context
+      ? this.injectContext(lastUserMsg.content, input.context)
+      : lastUserMsg.content;
 
     const agent = new KnovanaAgent(this.userId, this.kbRoot);
-    const sdkStream = agent.chat(conversationPrompt, CHAT_SYSTEM_PROMPT);
+    const sdkStream = agent.chat(
+      conversationPrompt,
+      CHAT_SYSTEM_PROMPT,
+      shouldResume ? sessionId : undefined,
+    );
 
     const assistantMessageId = `msg_${randomUUID().replace(/-/g, "").slice(0, 12)}`;
 
@@ -86,7 +115,42 @@ export class ChatService {
     let blockIndexOffset = 0;
     const contentBlocksCache: any[] = [];
 
+    let dbInitialized = shouldResume;
+
     for await (const msg of sdkStream) {
+      if (!dbInitialized) {
+        const generatedId =
+          (msg as any).session_id || (msg as any).message?.session_id;
+        if (generatedId) {
+          sessionId = generatedId;
+
+          // Ensure the session exists in SQLite
+          this.sessionRepo.create(sessionId!, this.userId, input.context);
+          const firstUserMsg = input.messages.find((m) => m.role === "user");
+          const title =
+            firstUserMsg?.content.slice(0, 50).trim() || "New Web Capture";
+          this.sessionRepo.updateTitle(sessionId!, title);
+
+          // Write history to SQLite
+          for (const historyMsg of input.messages) {
+            this.messageRepo.create(
+              sessionId!,
+              historyMsg.role,
+              historyMsg.content,
+            );
+          }
+          dbInitialized = true;
+
+          // Yield the session_created event to the client
+          yield {
+            event: "session_created",
+            data: {
+              sessionId,
+            },
+          };
+        }
+      }
+
       if (msg.type === "stream_event") {
         const ev = msg.event;
 
@@ -203,7 +267,7 @@ export class ChatService {
 
     // Save assistant's compiled reply to the database
     const fullAssistantResponse = textChunks.join("");
-    this.messageRepo.create(sessionId, "assistant", fullAssistantResponse);
+    this.messageRepo.create(sessionId!, "assistant", fullAssistantResponse);
 
     // Yield final PSP message_end event
     yield {
@@ -212,6 +276,15 @@ export class ChatService {
         type: "message_end",
       },
     };
+  }
+
+  createSession(title?: string, context?: any): ChatSession {
+    const sessionId = randomUUID();
+    const session = this.sessionRepo.create(sessionId, this.userId, context);
+    if (title) {
+      this.sessionRepo.updateTitle(sessionId, title);
+    }
+    return this.sessionRepo.get(sessionId)!;
   }
 
   listSessions(
@@ -247,6 +320,24 @@ export class ChatService {
     const session = this.sessionRepo.get(sessionId);
     if (session && session.user_id === this.userId) {
       this.sessionRepo.delete(sessionId);
+      this.messageRepo.clearSessionMessages(sessionId);
+      const store = new KnovanaSessionStore(this.userId);
+      store.delete({ projectKey: this.userId, sessionId });
+    }
+  }
+
+  deleteMessage(sessionId: string, messageId: string): void {
+    // 1. Delete message from chat_messages
+    this.messageRepo.deleteMessage(sessionId, messageId);
+
+    // 2. Clear external session store entries to force a rebuild on next turn
+    const store = new KnovanaSessionStore(this.userId);
+    store.delete({ projectKey: this.userId, sessionId });
+
+    // 3. Clear warm query process for this session so that it does not use stale state
+    const staleWarmQuery = SessionWarmPool.pop(this.userId, sessionId);
+    if (staleWarmQuery) {
+      staleWarmQuery.close();
     }
   }
 
@@ -274,24 +365,5 @@ export class ChatService {
     return parts.length > 0
       ? `${parts.join("\n\n")}\n\n【用户指令】: ${message}`
       : message;
-  }
-
-  /**
-   * Compiles recent history as contextual prefixes for a stateless agent execution.
-   */
-  private compileHistoryPrompt(currentMessage: string, history: any[]): string {
-    if (history.length <= 1) {
-      return currentMessage; // No history or just the current message
-    }
-
-    // Compile last 10 messages as text context
-    const contextLines = history
-      .slice(-10, -1) // Exclude current user message which is appended manually
-      .map(
-        (msg) =>
-          `${msg.role === "user" ? "User" : "Assistant"}: ${msg.content}`,
-      );
-
-    return `以下是先前的对话上下文历史：\n${contextLines.join("\n")}\n\n当前用户新消息：\n${currentMessage}`;
   }
 }

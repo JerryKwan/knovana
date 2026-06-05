@@ -78,6 +78,24 @@ export function runMigrations(): void {
       CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys(user_id);
     `);
 
+    // 5. Claude Session Entries table for external session transcripts
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS claude_session_entries (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_key  TEXT NOT NULL,
+        session_id   TEXT NOT NULL,
+        subpath      TEXT,
+        entry_uuid   TEXT UNIQUE,
+        data         TEXT NOT NULL,
+        created_at   TEXT DEFAULT (datetime('now'))
+      );
+    `);
+
+    // Index for claude_session_entries queries
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_claude_entries_lookup ON claude_session_entries(project_key, session_id);
+    `);
+
     db.exec("COMMIT;");
   } catch (err) {
     db.exec("ROLLBACK;");

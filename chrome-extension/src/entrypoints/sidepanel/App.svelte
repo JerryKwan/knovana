@@ -1,11 +1,18 @@
 <script lang="ts">
-  import { BookOpen, ChevronLeft, MessageCircle, Search, Settings } from '@lucide/svelte';
+  import {
+    BookOpen,
+    ChevronLeft,
+    MessageCircle,
+    Settings,
+    SquarePen,
+    History,
+  } from '@lucide/svelte';
   import { onMount } from 'svelte';
   import CapturePreview from '../../components/capture/CapturePreview.svelte';
   import ChatView from '../../components/chat/ChatView.svelte';
   import InputBar from '../../components/chat/InputBar.svelte';
   import KnowledgeView from '../../components/knowledge/KnowledgeView.svelte';
-  import SearchView from '../../components/knowledge/SearchView.svelte';
+  import HistoryView from '../../components/knowledge/HistoryView.svelte';
   import SettingsPanel from '../../components/settings/SettingsPanel.svelte';
   import { buildCaptureRequest } from '../../services/capture';
   import { sendRuntimeMessage } from '../../services/messaging';
@@ -17,7 +24,7 @@
   import type { RuntimeMessage } from '../../types/message';
   import type { ExtensionSettings } from '../../types/settings';
 
-  type Tab = 'chat' | 'knowledge' | 'search';
+  type Tab = 'chat' | 'knowledge' | 'history';
 
   let activeTab: Tab = 'chat';
   let currentContext: PageSnapshot | null = null;
@@ -31,14 +38,16 @@
   let chatRunning = false;
   let chatRequestId = '';
   let activeAssistantId = '';
+  let currentSessionId: string | undefined = undefined;
   let hasToken = false;
   let settingsOpen = false;
   let selectedModel = 'flash';
 
-  const tabs: Array<{ id: Tab; label: string; icon: typeof MessageCircle }> = [
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const tabs: Array<{ id: Tab; label: string; icon: any }> = [
     { id: 'chat', label: '对话', icon: MessageCircle },
     { id: 'knowledge', label: '知识库', icon: BookOpen },
-    { id: 'search', label: '搜索', icon: Search },
+    { id: 'history', label: '历史', icon: History },
   ];
 
   onMount(() => {
@@ -120,12 +129,20 @@
     chatRequestId = crypto.randomUUID();
     chatRunning = true;
 
+    // We let the Claude Code agent create the session, so we do not pre-generate currentSessionId here.
+
+    const messagesHistory = messages.slice(0, -1).map((m) => ({
+      role: m.role as 'user' | 'assistant',
+      content: m.content,
+    }));
+
     const contextSource = pendingAction?.context ?? currentContext;
     await sendRuntimeMessage({
       type: 'START_CHAT',
       requestId: chatRequestId,
       payload: {
-        message,
+        messages: messagesHistory,
+        session_id: currentSessionId,
         context: contextSource
           ? {
               page_url: contextSource.pageUrl,
@@ -168,18 +185,27 @@
   }
 
   function handleChatStream(event: ApiStreamEvent) {
+    if (event.sessionId) {
+      currentSessionId = event.sessionId;
+    }
     if (event.status === 'chunk') {
       appendAssistantContent(event.content ?? '');
       return;
     }
     if (event.status === 'error') {
-      appendAssistantContent(`\n\n${event.error ?? '请求失败'}`);
+      setAssistantError(event.error ?? '请求失败');
       finishAssistant();
       return;
     }
     if (event.status === 'done') {
       finishAssistant();
     }
+  }
+
+  function setAssistantError(error: string) {
+    messages = messages.map((message) =>
+      message.id === activeAssistantId ? { ...message, error } : message,
+    );
   }
 
   function appendAssistantContent(content: string) {
@@ -267,6 +293,58 @@
     // Call sendChat to trigger regeneration
     await sendChat(userMsg.content);
   }
+
+  function startNewSession() {
+    if (chatRunning) return;
+    messages = [];
+    currentSessionId = undefined;
+    pendingAction = null;
+    activeTab = 'chat';
+    clearCapture();
+  }
+
+  interface SessionDetailResponse {
+    id: string;
+    title: string;
+    messages: Array<{
+      id?: string;
+      role: 'user' | 'assistant';
+      content: string;
+      created_at?: string;
+    }>;
+  }
+
+  async function loadSessionDetail(sessionId: string) {
+    try {
+      const detail = await sendRuntimeMessage<SessionDetailResponse>({
+        type: 'GET_SESSION_DETAIL',
+        payload: { id: sessionId },
+      });
+      if (detail) {
+        messages = (detail.messages ?? []).map((m) => ({
+          id: m.id || crypto.randomUUID(),
+          role: m.role,
+          content: m.content,
+          createdAt: m.created_at ? new Date(m.created_at).getTime() : Date.now(),
+          isStreaming: false,
+        }));
+        currentSessionId = sessionId;
+        activeTab = 'chat';
+      }
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  function handleSelectSession(event: CustomEvent<{ sessionId: string }>) {
+    void loadSessionDetail(event.detail.sessionId);
+  }
+
+  function handleDeleteSession(event: CustomEvent<{ sessionId: string }>) {
+    if (currentSessionId === event.detail.sessionId) {
+      startNewSession();
+    }
+  }
 </script>
 
 <main class="shell">
@@ -276,15 +354,29 @@
       <span class="top-bar__slogan">积累有了归处，思想才能远行</span>
     </div>
 
-    <button
-      type="button"
-      class="top-bar__btn"
-      class:active={settingsOpen}
-      title="设置"
-      onclick={toggleSettings}
-    >
-      <Settings size={15} />
-    </button>
+    <div class="flex items-center gap-1">
+      {#if activeTab === 'chat' && messages.length > 0}
+        <button
+          type="button"
+          class="top-bar__btn"
+          disabled={chatRunning}
+          title="新对话"
+          onclick={startNewSession}
+        >
+          <SquarePen size={15} />
+        </button>
+      {/if}
+
+      <button
+        type="button"
+        class="top-bar__btn"
+        class:active={settingsOpen}
+        title="设置"
+        onclick={toggleSettings}
+      >
+        <Settings size={15} />
+      </button>
+    </div>
   </header>
 
   <!-- ═══ Tabs ══════════════════════════════════════════════════ -->
@@ -343,7 +435,11 @@
         {:else if activeTab === 'knowledge'}
           <KnowledgeView />
         {:else}
-          <SearchView />
+          <HistoryView
+            on:select={handleSelectSession}
+            on:newSession={startNewSession}
+            on:delete={handleDeleteSession}
+          />
         {/if}
       </section>
 

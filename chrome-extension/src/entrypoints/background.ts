@@ -180,6 +180,30 @@ async function handleRuntimeMessage(message: RuntimeMessage): Promise<RuntimeRes
         await apiJson<SearchResponse>(`/search?q=${encodeURIComponent(message.payload.query)}`),
       );
 
+    case 'GET_SESSIONS': {
+      const page = message.payload?.page ?? 1;
+      const perPage = message.payload?.per_page ?? 20;
+      return okResponse(await apiJson(`/chat/sessions?page=${page}&per_page=${perPage}`));
+    }
+
+    case 'GET_SESSION_DETAIL':
+      return okResponse(await apiJson(`/chat/sessions/${encodeURIComponent(message.payload.id)}`));
+
+    case 'DELETE_SESSION':
+      return okResponse(
+        await apiJson(`/chat/sessions/${encodeURIComponent(message.payload.id)}`, {
+          method: 'DELETE',
+        }),
+      );
+
+    case 'DELETE_MESSAGE':
+      return okResponse(
+        await apiJson(
+          `/chat/sessions/${encodeURIComponent(message.payload.sessionId)}/messages/${encodeURIComponent(message.payload.messageId)}`,
+          { method: 'DELETE' },
+        ),
+      );
+
     case 'OPEN_OPTIONS':
       await chrome.runtime.openOptionsPage();
       return okResponse(null);
@@ -196,9 +220,43 @@ async function streamChat(requestId: string, payload: ChatRequestBody): Promise<
 
   try {
     await apiStream('/chat', payload, async ({ raw, json }) => {
-      const content =
-        typeof json === 'object' && json && 'content' in json ? String(json.content) : raw;
-      await sendStreamEvent({ requestId, stream: 'chat', status: 'chunk', content });
+      let content: string;
+      let sessionId: string | undefined;
+      if (typeof json === 'object' && json !== null) {
+        const obj = json as Record<string, unknown>;
+        // Bubble up error structures from SSE to show errors in chat UI
+        if ('error' in obj) {
+          const errObj = obj.error as Record<string, unknown> | undefined;
+          throw new Error(errObj?.message ? String(errObj.message) : 'Server streaming failed');
+        }
+
+        const sessionVal = obj.sessionId || obj.session_id;
+        if (sessionVal) {
+          sessionId = String(sessionVal);
+        }
+
+        const delta = obj.delta as Record<string, unknown> | undefined;
+        if (obj.type === 'content_block_delta' && delta?.type === 'text_delta') {
+          content = String(delta.text);
+        } else if ('content' in obj) {
+          content = String(obj.content);
+        } else {
+          if (sessionId) {
+            await sendStreamEvent({
+              requestId,
+              stream: 'chat',
+              status: 'chunk',
+              content: '',
+              sessionId,
+            });
+          }
+          // Skip other PSP events like message_start, content_block_start to avoid showing JSON in user bubble
+          return;
+        }
+      } else {
+        content = raw;
+      }
+      await sendStreamEvent({ requestId, stream: 'chat', status: 'chunk', content, sessionId });
     });
     await sendStreamEvent({ requestId, stream: 'chat', status: 'done' });
   } catch (error) {

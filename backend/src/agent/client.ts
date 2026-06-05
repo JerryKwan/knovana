@@ -1,10 +1,5 @@
-import {
-  createSdkMcpServer,
-  query,
-  type SDKMessage,
-} from "@anthropic-ai/claude-agent-sdk";
-import { createTools } from "./tools";
-import { config } from "../config";
+import { query, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
+import { SessionWarmPool, getAgentOptions } from "./pool";
 
 export class KnovanaAgent {
   constructor(
@@ -14,58 +9,80 @@ export class KnovanaAgent {
 
   /**
    * Starts a conversational session with the agent, yielding SDK message events.
-   * Feeds process.env and custom base URLs to the agent runtime.
+   * Leverages pre-warmed subprocesses if available, and triggers background pre-warming for the next turn.
    */
   async *chat(
     message: string,
     systemPrompt: string,
+    sessionId?: string,
   ): AsyncGenerator<SDKMessage> {
-    const tools = createTools({ userId: this.userId, kbRoot: this.kbRoot });
-    const mcpServer = createSdkMcpServer({
-      name: "knovana",
-      version: "1.0.0",
-      tools,
-    });
+    const warmQuery = sessionId
+      ? SessionWarmPool.pop(this.userId, sessionId)
+      : null;
+    let result: any;
 
-    const toolNames = tools.map(
-      (toolDef: any) => `mcp__knovana__${toolDef.name}`,
-    );
-
-    // Compile environment variables for the agent subprocess
-    const envVars: Record<string, string | undefined> = {
-      ...process.env,
-    };
-    if (config.anthropicApiKey) {
-      envVars.ANTHROPIC_API_KEY = config.anthropicApiKey;
-    }
-    if (config.anthropicBaseUrl) {
-      envVars.ANTHROPIC_BASE_URL = config.anthropicBaseUrl;
-    }
-
-    const result = query({
-      prompt: message,
-      options: {
-        cwd: this.kbRoot,
+    if (warmQuery) {
+      try {
+        result = warmQuery.query(message);
+      } catch (err) {
+        console.warn(
+          `[KnovanaAgent] Failed to query warm process for session ${sessionId}, falling back to cold start:`,
+          err,
+        );
+        warmQuery.close();
+        const options = getAgentOptions(
+          this.userId,
+          this.kbRoot,
+          systemPrompt,
+          sessionId,
+        );
+        result = query({ prompt: message, options });
+      }
+    } else {
+      console.log(
+        `[KnovanaAgent] Cold start for session ${sessionId || "new"}`,
+      );
+      const options = getAgentOptions(
+        this.userId,
+        this.kbRoot,
         systemPrompt,
-        mcpServers: { knovana: mcpServer },
-        allowedTools: toolNames,
-        includePartialMessages: true,
-        settingSources: [],
-        env: envVars,
-      },
-    });
+        sessionId,
+      );
+      result = query({ prompt: message, options });
+    }
 
-    for await (const msg of result) {
-      yield msg;
+    let actualSessionId = sessionId;
+
+    try {
+      for await (const msg of result) {
+        if (!actualSessionId && msg.session_id) {
+          actualSessionId = msg.session_id;
+        }
+        yield msg;
+      }
+    } finally {
+      // Asynchronously pre-warm the next turn for this session
+      if (actualSessionId) {
+        SessionWarmPool.prewarm(
+          this.userId,
+          this.kbRoot,
+          systemPrompt,
+          actualSessionId,
+        );
+      }
     }
   }
 
   /**
    * Runs the agent loop and returns the aggregated text response.
    */
-  async process(message: string, systemPrompt: string): Promise<string> {
+  async process(
+    message: string,
+    systemPrompt: string,
+    sessionId: string,
+  ): Promise<string> {
     const chunks: string[] = [];
-    for await (const msg of this.chat(message, systemPrompt)) {
+    for await (const msg of this.chat(message, systemPrompt, sessionId)) {
       if (msg.type === "assistant") {
         const text = msg.message.content
           .filter((block) => block.type === "text")

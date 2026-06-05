@@ -8,6 +8,7 @@ export interface ApiStreamEvent {
   action?: string;
   path?: string;
   error?: string;
+  sessionId?: string;
 }
 
 export interface ChatContext {
@@ -18,7 +19,7 @@ export interface ChatContext {
 }
 
 export interface ChatRequestBody {
-  message: string;
+  messages: Array<{ role: 'user' | 'assistant'; content: string }>;
   session_id?: string;
   context?: ChatContext;
 }

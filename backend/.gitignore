@@ -17,3 +17,4 @@ knowledge-base/
 dist/
 build/
 *.log
+.claude/

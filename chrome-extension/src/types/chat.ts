@@ -4,4 +4,5 @@ export interface ChatMessage {
   content: string;
   createdAt: number;
   isStreaming?: boolean;
+  error?: string;
 }

@@ -4,23 +4,27 @@ import {
   ChatRequestSchema,
   ChatSessionsListResponseSchema,
   ChatSessionDetailResponseSchema,
+  CreateSessionRequestSchema,
+  CreateSessionResponseSchema,
 } from "../../models/schemas/chat";
 import {
   StatusResponseSchema,
   ErrorResponseSchema,
 } from "../../models/schemas/common";
+import { join } from "node:path";
+import { config } from "../../config";
 import { ChatService } from "../../services/chat-service";
 import type { AppEnv } from "../env";
 
 export const chatRoutes = new OpenAPIHono<AppEnv>();
 
-// 1. Post stream chat/capture route
+// 1. Post stream chat route
 const chatStreamRoute = createRoute({
   method: "post",
   path: "/",
-  summary: "流式对话 / 内容捕获",
+  summary: "智能助手流式对话",
   description:
-    "与 Knovana Agent 进行双向流式对话，或者发起内容捕获/摘要指令。返回标准的 SSE（Server-Sent Events）事件流。",
+    "与 Knovana Agent 进行双向流式对话。支持接收完整的历史消息列表进行恢复或继续对话。返回标准的 SSE（Server-Sent Events）事件流。",
   request: {
     body: {
       content: {
@@ -53,12 +57,39 @@ const chatStreamRoute = createRoute({
   },
 });
 
-// 2. Get sessions list
+// 2. Create session route
+const createSessionRoute = createRoute({
+  method: "post",
+  path: "/sessions",
+  summary: "创建新会话",
+  description: "显式创建一个新的聊天会话，可传入初始标题和页面上下文",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: CreateSessionRequestSchema,
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      content: {
+        "application/json": {
+          schema: CreateSessionResponseSchema,
+        },
+      },
+      description: "会话创建成功",
+    },
+  },
+});
+
+// 3. Get sessions list
 const listSessionsRoute = createRoute({
   method: "get",
   path: "/sessions",
   summary: "获取会话列表",
-  description: "按更新时间倒序，获取当前用户的所有聊天/捕获历史会话",
+  description: "按更新时间倒序，获取当前用户的所有聊天历史会话",
   request: {
     query: z.object({
       page: z.coerce
@@ -87,7 +118,7 @@ const listSessionsRoute = createRoute({
   },
 });
 
-// 3. Get session details
+// 4. Get session details
 const getSessionRoute = createRoute({
   method: "get",
   path: "/sessions/{id}",
@@ -120,12 +151,12 @@ const getSessionRoute = createRoute({
   },
 });
 
-// 4. Delete session
+// 5. Delete session
 const deleteSessionRoute = createRoute({
   method: "delete",
   path: "/sessions/{id}",
   summary: "删除会话",
-  description: "物理删除指定会话 ID 及其下的所有聊天记录",
+  description: "物理删除指定会话 ID 及其下的所有聊天记录与外部 Session 记录",
   request: {
     params: z.object({
       id: z
@@ -145,11 +176,42 @@ const deleteSessionRoute = createRoute({
   },
 });
 
+// 6. Delete message route
+const deleteMessageRoute = createRoute({
+  method: "delete",
+  path: "/sessions/{id}/messages/{messageId}",
+  summary: "删除单条消息",
+  description: "从指定会话中物理删除一条聊天消息",
+  request: {
+    params: z.object({
+      id: z
+        .string()
+        .openapi({ description: "会话 ID", example: "sess_abc123" }),
+      messageId: z
+        .string()
+        .openapi({ description: "消息 ID", example: "msg_xyz456" }),
+    }),
+  },
+  responses: {
+    200: {
+      content: {
+        "application/json": {
+          schema: StatusResponseSchema,
+        },
+      },
+      description: "消息删除成功",
+    },
+  },
+});
+
 // Implement handlers
 chatRoutes.openapi(chatStreamRoute, async (c) => {
   const input = c.req.valid("json");
   const user = c.get("user");
-  const chatService = new ChatService(user.id, user.kb_path);
+  const chatService = new ChatService(
+    user.id,
+    join(config.kbRoot, user.kb_path),
+  );
 
   return streamSSE(c, async (stream) => {
     try {
@@ -174,10 +236,24 @@ chatRoutes.openapi(chatStreamRoute, async (c) => {
   });
 });
 
+chatRoutes.openapi(createSessionRoute, async (c) => {
+  const body = c.req.valid("json");
+  const user = c.get("user");
+  const chatService = new ChatService(
+    user.id,
+    join(config.kbRoot, user.kb_path),
+  );
+  const session = chatService.createSession(body.title, body.context);
+  return c.json(session, 200);
+});
+
 chatRoutes.openapi(listSessionsRoute, async (c) => {
   const { page, per_page } = c.req.valid("query");
   const user = c.get("user");
-  const chatService = new ChatService(user.id, user.kb_path);
+  const chatService = new ChatService(
+    user.id,
+    join(config.kbRoot, user.kb_path),
+  );
   const result = chatService.listSessions(page, per_page);
   return c.json(result, 200);
 });
@@ -185,7 +261,10 @@ chatRoutes.openapi(listSessionsRoute, async (c) => {
 chatRoutes.openapi(getSessionRoute, async (c) => {
   const { id } = c.req.valid("param");
   const user = c.get("user");
-  const chatService = new ChatService(user.id, user.kb_path);
+  const chatService = new ChatService(
+    user.id,
+    join(config.kbRoot, user.kb_path),
+  );
   try {
     const result = chatService.getSession(id);
     return c.json(result, 200);
@@ -205,7 +284,21 @@ chatRoutes.openapi(getSessionRoute, async (c) => {
 chatRoutes.openapi(deleteSessionRoute, async (c) => {
   const { id } = c.req.valid("param");
   const user = c.get("user");
-  const chatService = new ChatService(user.id, user.kb_path);
+  const chatService = new ChatService(
+    user.id,
+    join(config.kbRoot, user.kb_path),
+  );
   chatService.deleteSession(id);
+  return c.json({ status: "deleted" }, 200);
+});
+
+chatRoutes.openapi(deleteMessageRoute, async (c) => {
+  const { id, messageId } = c.req.valid("param");
+  const user = c.get("user");
+  const chatService = new ChatService(
+    user.id,
+    join(config.kbRoot, user.kb_path),
+  );
+  chatService.deleteMessage(id, messageId);
   return c.json({ status: "deleted" }, 200);
 });
