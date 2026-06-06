@@ -6,6 +6,11 @@ import { UserRepository } from "../../storage/repositories/user-repo";
 import { ApiKeyService } from "../../services/api-key-service";
 
 export const authMiddleware = createMiddleware<AppEnv>(async (c, next) => {
+  if (c.req.method === "OPTIONS") {
+    await next();
+    return;
+  }
+
   const authorization = c.req.header("Authorization");
   const token = authorization?.startsWith("Bearer ")
     ? authorization.slice("Bearer ".length)

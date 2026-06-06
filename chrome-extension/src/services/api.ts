@@ -23,14 +23,16 @@ export async function apiStream(
   endpoint: string,
   body: unknown,
   onData: (data: ParsedSseData) => void | Promise<void>,
+  signal?: AbortSignal,
 ): Promise<void> {
   const response = await apiFetch(endpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
+    signal,
   });
 
-  await readSseStream(response, onData);
+  await readSseStream(response, onData, signal);
 }
 
 async function apiFetch(endpoint: string, init: RequestInit = {}): Promise<Response> {

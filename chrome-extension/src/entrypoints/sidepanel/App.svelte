@@ -123,6 +123,8 @@
       content: '',
       createdAt: Date.now(),
       isStreaming: true,
+      blocks: [],
+      statusRail: { text: '思考中...', indicator: 'thinking' },
     };
     messages = [...messages, userMessage, assistantMessage];
     activeAssistantId = assistantMessage.id;
@@ -137,6 +139,15 @@
         session_id: currentSessionId,
       },
     });
+  }
+
+  async function stopChat() {
+    if (!chatRunning) return;
+    await sendRuntimeMessage({
+      type: 'ABORT_CHAT',
+      requestId: chatRequestId,
+    });
+    finishAssistant();
   }
 
   function handleStreamEvent(event: ApiStreamEvent) {
@@ -173,7 +184,11 @@
       currentSessionId = event.sessionId;
     }
     if (event.status === 'chunk') {
-      appendAssistantContent(event.content ?? '');
+      if (event.pspEvent) {
+        updateAssistantPspEvent(event.pspEvent);
+      } else {
+        appendAssistantContent(event.content ?? '');
+      }
       return;
     }
     if (event.status === 'error') {
@@ -184,6 +199,146 @@
     if (event.status === 'done') {
       finishAssistant();
     }
+  }
+
+  function updateAssistantPspEvent(pspEvent: Record<string, unknown>) {
+    messages = messages.map((message) => {
+      if (message.id !== activeAssistantId) return message;
+
+      const blocks = message.blocks ? [...message.blocks] : [];
+      let statusRail: ChatMessage['statusRail'] = message.statusRail
+        ? { ...message.statusRail }
+        : { text: '思考中...', indicator: 'thinking' as const };
+      let content = message.content;
+
+      const type = pspEvent.type as string;
+
+      if (type === 'message_start') {
+        statusRail = { text: '思考中...', indicator: 'thinking' };
+      } else if (type === 'status') {
+        statusRail = {
+          text: (pspEvent.text as string) || '',
+          indicator: (pspEvent.indicator as 'thinking' | 'tool' | 'loading') || 'thinking',
+        };
+      } else if (type === 'content_block_start') {
+        const idx = pspEvent.index as number;
+        const cb = pspEvent.content_block as Record<string, unknown>;
+        const cbType = cb.type as string;
+        if (cbType === 'tool_call') {
+          blocks[idx] = {
+            type: 'tool_call',
+            id: cb.id as string,
+            name: cb.name as string,
+            input: (cb.input as Record<string, unknown>) || {},
+            partialJson: '',
+          };
+          statusRail = { text: `正在执行工具 ${cb.name as string}...`, indicator: 'tool' };
+        } else if (cbType === 'tool_result') {
+          blocks[idx] = {
+            type: 'tool_result',
+            tool_call_id: cb.tool_call_id as string,
+            status: (cb.status as 'success' | 'error') || 'success',
+            content: cb.content,
+          };
+        } else if (cbType === 'text') {
+          blocks[idx] = {
+            type: 'text',
+            text: '',
+          };
+        } else if (cbType === 'thinking') {
+          blocks[idx] = {
+            type: 'thinking',
+            text: '',
+          };
+        } else if (cbType === 'widget') {
+          blocks[idx] = {
+            type: 'widget',
+            widget_type: cb.widget_type as string,
+            data: cb.data,
+          };
+        }
+      } else if (type === 'content_block_delta') {
+        const idx = pspEvent.index as number;
+        const delta = pspEvent.delta as Record<string, unknown>;
+        const deltaType = delta.type as string;
+        let block = blocks[idx];
+        if (!block) {
+          if (deltaType === 'text_delta') {
+            block = { type: 'text', text: '' };
+          } else if (deltaType === 'thinking_delta') {
+            block = { type: 'thinking', text: '' };
+          } else if (deltaType === 'input_json_delta') {
+            block = { type: 'tool_call', id: '', name: '', input: {}, partialJson: '' };
+          }
+        }
+
+        if (block) {
+          if (block.type === 'text' && deltaType === 'text_delta') {
+            block.text = (block.text || '') + (delta.text as string);
+          } else if (block.type === 'thinking' && deltaType === 'thinking_delta') {
+            block.text = (block.text || '') + (delta.text as string);
+          } else if (block.type === 'tool_call' && deltaType === 'input_json_delta') {
+            block.partialJson = (block.partialJson || '') + (delta.partial_json as string);
+            try {
+              block.input = JSON.parse(block.partialJson);
+            } catch {
+              // incomplete JSON
+            }
+          }
+          blocks[idx] = block;
+        }
+      } else if (type === 'content_block_stop') {
+        const idx = pspEvent.index as number;
+        const cb = pspEvent.content_block as Record<string, unknown>;
+        const cbType = cb.type as string;
+        if (cbType === 'tool_call') {
+          blocks[idx] = {
+            type: 'tool_call',
+            id: cb.id as string,
+            name: cb.name as string,
+            input: (cb.input as Record<string, unknown>) || {},
+          };
+          statusRail = { text: '思考中...', indicator: 'thinking' };
+        } else if (cbType === 'tool_result') {
+          blocks[idx] = {
+            type: 'tool_result',
+            tool_call_id: cb.tool_call_id as string,
+            status: (cb.status as 'success' | 'error') || 'success',
+            content: cb.content,
+          };
+        } else if (cbType === 'text') {
+          blocks[idx] = {
+            type: 'text',
+            text: (cb.text as string) || '',
+          };
+        } else if (cbType === 'thinking') {
+          blocks[idx] = {
+            type: 'thinking',
+            text: (cb.text as string) || '',
+          };
+        } else if (cbType === 'widget') {
+          blocks[idx] = {
+            type: 'widget',
+            widget_type: cb.widget_type as string,
+            data: cb.data,
+          };
+        }
+      } else if (type === 'message_end') {
+        statusRail = null;
+      }
+
+      content = blocks
+        .filter((b) => b.type === 'text')
+        .map((b) => b.text)
+        .join('');
+
+      return {
+        ...message,
+        blocks,
+        statusRail,
+        content,
+      };
+    });
   }
 
   function setAssistantError(error: string) {
@@ -203,7 +358,9 @@
   function finishAssistant() {
     chatRunning = false;
     messages = messages.map((message) =>
-      message.id === activeAssistantId ? { ...message, isStreaming: false } : message,
+      message.id === activeAssistantId
+        ? { ...message, isStreaming: false, statusRail: null }
+        : message,
     );
   }
 
@@ -286,6 +443,8 @@
       content: '',
       createdAt: Date.now(),
       isStreaming: true,
+      blocks: [],
+      statusRail: { text: '思考中...', indicator: 'thinking' },
     };
     messages = [...messages, assistantMessage];
     activeAssistantId = assistantMessage.id;
@@ -334,6 +493,7 @@
           content: m.content,
           createdAt: m.created_at ? new Date(m.created_at).getTime() : Date.now(),
           isStreaming: false,
+          blocks: m.role === 'assistant' ? [{ type: 'text', text: m.content }] : undefined,
         }));
         currentSessionId = sessionId;
         activeTab = 'chat';
@@ -454,6 +614,7 @@
         <InputBar
           disabled={chatRunning}
           onSubmit={sendChat}
+          onStop={stopChat}
           bind:selectedModel
           onQuickAction={handleQuickAction}
         />

@@ -80,6 +80,13 @@
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
   }
+
+  function getMessageBlocks(message: ChatMessage) {
+    if (message.blocks && message.blocks.length > 0) {
+      return message.blocks;
+    }
+    return [{ type: 'text' as const, text: message.content || '' }];
+  }
 </script>
 
 <section class="flex min-h-0 flex-1 flex-col">
@@ -104,7 +111,75 @@
             </div>
 
             <div class="bubble">
-              <Markdown content={message.content} />
+              {#each getMessageBlocks(message) as block, idx (idx)}
+                <div class="block-item block-type-{block.type} block-idx-{idx}">
+                  {#if block.type === 'text'}
+                    {#if block.text}
+                      <div class="block-text">
+                        <Markdown content={block.text} />
+                      </div>
+                    {/if}
+                  {:else if block.type === 'thinking'}
+                    {#if block.text}
+                      <details class="block-thinking" open={message.isStreaming}>
+                        <summary class="thinking-header">
+                          <span class="thinking-icon">🧠</span>
+                          <span>思考过程</span>
+                        </summary>
+                        <div class="thinking-content">
+                          <Markdown content={block.text} />
+                        </div>
+                      </details>
+                    {/if}
+                  {:else if block.type === 'tool_call'}
+                    <div class="block-tool-call">
+                      <div class="tool-call-header">
+                        <span class="tool-icon">🛠️</span>
+                        <span>执行工具: <code class="tool-name">{block.name}</code></span>
+                      </div>
+                      {#if block.input && Object.keys(block.input).length > 0}
+                        <pre class="tool-call-input kn-scrollbar"><code
+                            >{JSON.stringify(block.input, null, 2)}</code
+                          ></pre>
+                      {:else if block.partialJson}
+                        <pre class="tool-call-input kn-scrollbar"><code>{block.partialJson}</code
+                          ></pre>
+                      {/if}
+                    </div>
+                  {:else if block.type === 'tool_result'}
+                    <div class="block-tool-result" class:error={block.status === 'error'}>
+                      <div class="tool-result-header">
+                        <span class="result-icon">{block.status === 'error' ? '❌' : '✅'}</span>
+                        <span
+                          >工具返回结果 <span
+                            class="status-pill"
+                            class:error={block.status === 'error'}>{block.status}</span
+                          ></span
+                        >
+                      </div>
+                      {#if block.content}
+                        <div class="tool-result-markdown kn-scrollbar">
+                          <Markdown
+                            content={typeof block.content === 'object'
+                              ? '```json\n' + JSON.stringify(block.content, null, 2) + '\n```'
+                              : String(block.content)}
+                          />
+                        </div>
+                      {/if}
+                    </div>
+                  {:else if block.type === 'widget'}
+                    <div class="block-widget">
+                      <div class="widget-header">
+                        <span class="widget-icon">🧩</span>
+                        <span>组件: {block.widget_type}</span>
+                      </div>
+                      <pre class="widget-data kn-scrollbar"><code
+                          >{JSON.stringify(block.data, null, 2)}</code
+                        ></pre>
+                    </div>
+                  {/if}
+                </div>
+              {/each}
             </div>
 
             <!-- Status Tail for Error / Streaming status -->
@@ -113,14 +188,18 @@
                 <span class="error-icon">⚠️</span>
                 <span class="error-msg">{getBriefError(message.error)}</span>
               </div>
-            {:else if message.isStreaming && !message.content}
+            {:else if message.isStreaming}
               <div class="status-tail streaming">
-                <span class="pulse-dot"></span>
-                <span>Knovana Agent 正在思考并准备环境...</span>
+                {#if (message.statusRail?.indicator || 'thinking') === 'tool'}
+                  <span class="tool-icon-spinning">⚙️</span>
+                {:else}
+                  <span class="pulse-dot"></span>
+                {/if}
+                <span>{message.statusRail?.text || '思考中...'}</span>
               </div>
             {/if}
 
-            {#if message.content}
+            {#if message.content || (message.blocks && message.blocks.length > 0)}
               <div class="message-actions">
                 <button
                   type="button"
@@ -292,11 +371,186 @@
   }
 
   .message.assistant .bubble {
-    border: 0;
-    background: transparent;
-    padding: 0;
+    border: 1px solid color-mix(in srgb, var(--kn-border) 30%, transparent);
+    border-radius: 16px;
+    background: color-mix(in srgb, var(--kn-bg-subtle) 30%, var(--kn-bg-raised));
+    padding: 12px 14px;
     color: var(--kn-text);
     width: 100%;
+    max-width: 95%;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.01);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .block-text {
+    width: 100%;
+  }
+
+  .block-thinking {
+    margin: 6px 0;
+    border: 1px solid color-mix(in srgb, var(--kn-border) 30%, transparent);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--kn-bg-subtle) 25%, var(--kn-bg-raised));
+    overflow: hidden;
+    width: 100%;
+  }
+
+  .thinking-header {
+    padding: 6px 10px;
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--kn-text-muted);
+    cursor: pointer;
+    user-select: none;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: color-mix(in srgb, var(--kn-bg-subtle) 10%, var(--kn-bg-raised));
+  }
+
+  .thinking-header::-webkit-details-marker {
+    display: none;
+  }
+
+  .thinking-content {
+    padding: 8px 10px;
+    font-size: 12.5px;
+    border-top: 1px solid color-mix(in srgb, var(--kn-border) 30%, transparent);
+    color: var(--kn-text-muted);
+    background: var(--kn-bg-raised);
+  }
+
+  .block-tool-call {
+    margin: 6px 0;
+    border: 1px solid color-mix(in srgb, var(--kn-border) 40%, transparent);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--kn-primary) 3%, var(--kn-bg-raised));
+    overflow: hidden;
+    width: 100%;
+  }
+
+  .tool-call-header {
+    padding: 6px 10px;
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--kn-text);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    border-bottom: 1px dashed color-mix(in srgb, var(--kn-border) 40%, transparent);
+  }
+
+  .tool-name {
+    font-family: monospace;
+    background: var(--kn-bg-subtle);
+    padding: 1px 5px;
+    border-radius: 4px;
+    color: var(--kn-accent);
+  }
+
+  .tool-call-input {
+    margin: 0;
+    padding: 8px 10px;
+    font-size: 11px;
+    background: color-mix(in srgb, var(--kn-bg-subtle) 10%, var(--kn-bg-raised));
+    max-height: 120px;
+    overflow-y: auto;
+    font-family: monospace;
+  }
+
+  .block-tool-result {
+    margin: 6px 0;
+    border: 1px solid color-mix(in srgb, var(--kn-border) 40%, transparent);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--kn-primary) 1.5%, var(--kn-bg-raised));
+    overflow: hidden;
+    width: 100%;
+  }
+
+  .block-tool-result.error {
+    border-color: color-mix(in srgb, var(--kn-danger) 20%, var(--kn-border));
+    background: color-mix(in srgb, var(--kn-danger) 1.5%, var(--kn-bg-raised));
+  }
+
+  .tool-result-header {
+    padding: 6px 10px;
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--kn-text);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    border-bottom: 1px dashed color-mix(in srgb, var(--kn-border) 40%, transparent);
+  }
+
+  .status-pill {
+    font-size: 9.5px;
+    padding: 1px 4px;
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--kn-primary) 10%, transparent);
+    color: var(--kn-text-muted);
+    text-transform: uppercase;
+  }
+
+  .status-pill.error {
+    background: color-mix(in srgb, var(--kn-danger) 10%, transparent);
+    color: var(--kn-danger);
+  }
+
+  .tool-result-markdown {
+    padding: 10px 12px;
+    background: color-mix(in srgb, var(--kn-bg-subtle) 10%, var(--kn-bg-raised));
+    max-height: 250px;
+    overflow-y: auto;
+    border-top: 1px dashed color-mix(in srgb, var(--kn-border) 40%, transparent);
+    font-size: 12.5px;
+  }
+
+  .block-widget {
+    margin: 6px 0;
+    border: 1px solid color-mix(in srgb, var(--kn-border) 40%, transparent);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--kn-primary) 1.5%, var(--kn-bg-raised));
+    overflow: hidden;
+    width: 100%;
+  }
+
+  .widget-header {
+    padding: 6px 10px;
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--kn-text);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    border-bottom: 1px dashed color-mix(in srgb, var(--kn-border) 40%, transparent);
+  }
+
+  .widget-data {
+    margin: 0;
+    padding: 8px 10px;
+    font-size: 11px;
+    background: color-mix(in srgb, var(--kn-bg-subtle) 10%, var(--kn-bg-raised));
+    max-height: 150px;
+    overflow-y: auto;
+    font-family: monospace;
+  }
+
+  .tool-icon-spinning {
+    display: inline-block;
+    animation: spin 2s linear infinite;
+    font-size: 11px;
+  }
+
+  @keyframes spin {
+    from {
+      transform: rotate(0deg);
+    }
+    to {
+      transform: rotate(360deg);
+    }
   }
 
   .message-actions {

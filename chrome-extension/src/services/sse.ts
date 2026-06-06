@@ -6,6 +6,7 @@ export interface ParsedSseData {
 export async function readSseStream(
   response: Response,
   onData: (data: ParsedSseData) => void | Promise<void>,
+  signal?: AbortSignal,
 ): Promise<void> {
   if (!response.ok) {
     const body = await response.text().catch(() => '');
@@ -21,6 +22,9 @@ export async function readSseStream(
   let buffer = '';
 
   while (true) {
+    if (signal?.aborted) {
+      throw new DOMException('The user aborted a request.', 'AbortError');
+    }
     const { done, value } = await reader.read();
     if (done) break;
 

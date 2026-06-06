@@ -9,6 +9,7 @@ export interface ApiStreamEvent {
   path?: string;
   error?: string;
   sessionId?: string;
+  pspEvent?: Record<string, unknown>;
 }
 
 export interface ChatContext {

@@ -54,8 +54,38 @@
 
   .markdown :global(blockquote) {
     margin: 0.75rem 0;
-    border-left: 3px solid var(--kn-primary);
-    padding-left: 0.75rem;
+    border-left: 3px solid var(--kn-accent);
+    background: color-mix(in srgb, var(--kn-accent) 5%, var(--kn-bg-raised));
+    border-radius: 0 8px 8px 0;
+    padding: 0.6rem 0.9rem;
     color: var(--kn-text-muted);
+    font-style: italic;
+  }
+
+  .markdown :global(table) {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0.85rem 0;
+    font-size: 0.9em;
+    line-height: 1.5;
+  }
+
+  .markdown :global(th) {
+    background: var(--kn-bg-subtle);
+    color: var(--kn-text);
+    font-weight: 600;
+    border: 1px solid var(--kn-border);
+    padding: 6px 10px;
+    text-align: left;
+  }
+
+  .markdown :global(td) {
+    border: 1px solid var(--kn-border);
+    padding: 6px 10px;
+    color: var(--kn-text);
+  }
+
+  .markdown :global(tr:nth-child(even)) {
+    background: color-mix(in srgb, var(--kn-bg-subtle) 25%, transparent);
   }
 </style>

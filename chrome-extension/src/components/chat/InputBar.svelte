@@ -15,6 +15,7 @@
   export let onSubmit: (value: string) => void = () => undefined;
   export let selectedModel = 'auto';
   export let onQuickAction: (actionId: string) => void = () => undefined;
+  export let onStop: () => void = () => undefined;
 
   let value = '';
   let textarea: HTMLTextAreaElement;
@@ -165,15 +166,21 @@
           {/if}
         </div>
 
-        <button
-          type="button"
-          class="send-btn"
-          disabled={disabled || !value.trim()}
-          title="发送"
-          onclick={submit}
-        >
-          <Send size={13} />
-        </button>
+        {#if disabled}
+          <button type="button" class="stop-btn" title="停止生成" onclick={onStop}>
+            <span class="stop-icon"></span>
+          </button>
+        {:else}
+          <button
+            type="button"
+            class="send-btn"
+            disabled={!value.trim()}
+            title="发送"
+            onclick={submit}
+          >
+            <Send size={13} />
+          </button>
+        {/if}
       </div>
     </div>
   </div>
@@ -370,5 +377,34 @@
     height: 1px;
     background: var(--kn-border);
     margin: 4px 6px;
+  }
+
+  .stop-btn {
+    display: grid;
+    width: 28px;
+    height: 28px;
+    place-items: center;
+    border: 1px solid var(--kn-border);
+    border-radius: 50%;
+    background: var(--kn-bg-raised);
+    color: var(--kn-text);
+    cursor: pointer;
+    transition:
+      background 150ms ease,
+      transform 150ms ease,
+      border-color 150ms ease;
+  }
+
+  .stop-btn:hover {
+    background: var(--kn-bg-subtle);
+    border-color: var(--kn-text-muted);
+    transform: scale(1.05);
+  }
+
+  .stop-icon {
+    width: 8px;
+    height: 8px;
+    background: currentColor;
+    border-radius: 1px;
   }
 </style>

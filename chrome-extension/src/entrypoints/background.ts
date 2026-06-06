@@ -26,6 +26,16 @@ const CAPTURE_MENU_IDS = new Set<CaptureAction>([
   'save-page',
 ]);
 
+const activeAbortControllers = new Map<string, AbortController>();
+
+function abortChat(requestId: string): void {
+  const controller = activeAbortControllers.get(requestId);
+  if (controller) {
+    controller.abort();
+    activeAbortControllers.delete(requestId);
+  }
+}
+
 export default defineBackground(() => {
   chrome.runtime.onInstalled.addListener(() => {
     void setupExtension();
@@ -156,6 +166,10 @@ async function handleRuntimeMessage(message: RuntimeMessage): Promise<RuntimeRes
       void streamRegenerate(message.requestId, message.payload);
       return okResponse({ requestId: message.requestId });
 
+    case 'ABORT_CHAT':
+      abortChat(message.requestId);
+      return okResponse(null);
+
     case 'START_CAPTURE':
       void streamCapture(message.requestId, message.payload);
       return okResponse({ requestId: message.requestId });
@@ -222,106 +236,130 @@ async function handleRuntimeMessage(message: RuntimeMessage): Promise<RuntimeRes
 async function streamChat(requestId: string, payload: ChatRequestBody): Promise<void> {
   await sendStreamEvent({ requestId, stream: 'chat', status: 'start' });
 
+  const controller = new AbortController();
+  activeAbortControllers.set(requestId, controller);
+
   try {
-    await apiStream('/chat', payload, async ({ raw, json }) => {
-      let content: string;
-      let sessionId: string | undefined;
-      if (typeof json === 'object' && json !== null) {
-        const obj = json as Record<string, unknown>;
-        // Bubble up error structures from SSE to show errors in chat UI
-        if ('error' in obj) {
-          const errObj = obj.error as Record<string, unknown> | undefined;
-          throw new Error(errObj?.message ? String(errObj.message) : 'Server streaming failed');
-        }
-
-        const sessionVal = obj.sessionId || obj.session_id;
-        if (sessionVal) {
-          sessionId = String(sessionVal);
-        }
-
-        const delta = obj.delta as Record<string, unknown> | undefined;
-        if (obj.type === 'content_block_delta' && delta?.type === 'text_delta') {
-          content = String(delta.text);
-        } else if ('content' in obj) {
-          content = String(obj.content);
-        } else {
-          if (sessionId) {
-            await sendStreamEvent({
-              requestId,
-              stream: 'chat',
-              status: 'chunk',
-              content: '',
-              sessionId,
-            });
+    await apiStream(
+      '/chat',
+      payload,
+      async ({ raw, json }) => {
+        let sessionId: string | undefined;
+        if (typeof json === 'object' && json !== null) {
+          const obj = json as Record<string, unknown>;
+          if ('error' in obj) {
+            const errObj = obj.error as Record<string, unknown> | undefined;
+            throw new Error(errObj?.message ? String(errObj.message) : 'Server streaming failed');
           }
-          // Skip other PSP events like message_start, content_block_start to avoid showing JSON in user bubble
-          return;
+
+          const sessionVal = obj.sessionId || obj.session_id;
+          if (sessionVal) {
+            sessionId = String(sessionVal);
+          }
+
+          await sendStreamEvent({
+            requestId,
+            stream: 'chat',
+            status: 'chunk',
+            sessionId,
+            pspEvent: obj,
+          });
+        } else {
+          await sendStreamEvent({
+            requestId,
+            stream: 'chat',
+            status: 'chunk',
+            content: raw,
+          });
         }
-      } else {
-        content = raw;
-      }
-      await sendStreamEvent({ requestId, stream: 'chat', status: 'chunk', content, sessionId });
-    });
+      },
+      controller.signal,
+    );
     await sendStreamEvent({ requestId, stream: 'chat', status: 'done' });
   } catch (error) {
-    await sendStreamEvent({
-      requestId,
-      stream: 'chat',
-      status: 'error',
-      error: getErrorMessage(error),
-    });
+    const isAbort =
+      (error instanceof Error && error.name === 'AbortError') ||
+      String(error).includes('AbortError') ||
+      String(error).includes('aborted') ||
+      String(error).includes('Abort');
+
+    if (isAbort) {
+      await sendStreamEvent({ requestId, stream: 'chat', status: 'done' });
+    } else {
+      await sendStreamEvent({
+        requestId,
+        stream: 'chat',
+        status: 'error',
+        error: getErrorMessage(error),
+      });
+    }
+  } finally {
+    activeAbortControllers.delete(requestId);
   }
 }
 
 async function streamRegenerate(requestId: string, payload: { session_id: string }): Promise<void> {
   await sendStreamEvent({ requestId, stream: 'chat', status: 'start' });
 
+  const controller = new AbortController();
+  activeAbortControllers.set(requestId, controller);
+
   try {
-    await apiStream('/chat/regenerate', payload, async ({ raw, json }) => {
-      let content: string;
-      let sessionId: string | undefined;
-      if (typeof json === 'object' && json !== null) {
-        const obj = json as Record<string, unknown>;
-        if ('error' in obj) {
-          const errObj = obj.error as Record<string, unknown> | undefined;
-          throw new Error(errObj?.message ? String(errObj.message) : 'Server streaming failed');
-        }
-
-        const sessionVal = obj.sessionId || obj.session_id;
-        if (sessionVal) {
-          sessionId = String(sessionVal);
-        }
-
-        const delta = obj.delta as Record<string, unknown> | undefined;
-        if (obj.type === 'content_block_delta' && delta?.type === 'text_delta') {
-          content = String(delta.text);
-        } else if ('content' in obj) {
-          content = String(obj.content);
-        } else {
-          if (sessionId) {
-            await sendStreamEvent({
-              requestId,
-              stream: 'chat',
-              status: 'chunk',
-              content: '',
-              sessionId,
-            });
+    await apiStream(
+      '/chat/regenerate',
+      payload,
+      async ({ raw, json }) => {
+        let sessionId: string | undefined;
+        if (typeof json === 'object' && json !== null) {
+          const obj = json as Record<string, unknown>;
+          if ('error' in obj) {
+            const errObj = obj.error as Record<string, unknown> | undefined;
+            throw new Error(errObj?.message ? String(errObj.message) : 'Server streaming failed');
           }
-          return;
+
+          const sessionVal = obj.sessionId || obj.session_id;
+          if (sessionVal) {
+            sessionId = String(sessionVal);
+          }
+
+          await sendStreamEvent({
+            requestId,
+            stream: 'chat',
+            status: 'chunk',
+            sessionId,
+            pspEvent: obj,
+          });
+        } else {
+          await sendStreamEvent({
+            requestId,
+            stream: 'chat',
+            status: 'chunk',
+            content: raw,
+          });
         }
-      } else {
-        content = raw;
-      }
-      await sendStreamEvent({ requestId, stream: 'chat', status: 'chunk', content, sessionId });
-    });
+      },
+      controller.signal,
+    );
     await sendStreamEvent({ requestId, stream: 'chat', status: 'done' });
   } catch (error) {
-    await sendStreamEvent({
-      requestId,
-      stream: 'chat',
-      status: 'error',
-      error: getErrorMessage(error),
-    });
+    const isAbort =
+      (error instanceof Error && error.name === 'AbortError') ||
+      String(error).includes('AbortError') ||
+      String(error).includes('aborted') ||
+      String(error).includes('Abort');
+
+    if (isAbort) {
+      await sendStreamEvent({ requestId, stream: 'chat', status: 'done' });
+    } else {
+      await sendStreamEvent({
+        requestId,
+        stream: 'chat',
+        status: 'error',
+        error: getErrorMessage(error),
+      });
+    }
+  } finally {
+    activeAbortControllers.delete(requestId);
   }
 }
 
