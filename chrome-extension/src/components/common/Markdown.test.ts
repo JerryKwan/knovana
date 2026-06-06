@@ -26,4 +26,19 @@ describe('Markdown', () => {
     expect(container.querySelector('img')?.getAttribute('onerror')).toBeNull();
     expect(container.textContent).toContain('Safe text');
   });
+
+  it('renders inline code and fenced code blocks with distinct structure', () => {
+    const { container } = render(Markdown, {
+      props: {
+        content: 'Use `pnpm check` before merging.\n\n```ts\nconst ok = true;\n```',
+      },
+    });
+
+    const inlineCode = container.querySelector('p code');
+    const codeBlock = container.querySelector('pre code');
+
+    expect(inlineCode?.textContent).toBe('pnpm check');
+    expect(codeBlock?.textContent).toContain('const ok = true;');
+    expect(codeBlock?.parentElement?.tagName).toBe('PRE');
+  });
 });

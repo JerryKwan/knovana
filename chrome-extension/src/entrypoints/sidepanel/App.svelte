@@ -124,7 +124,7 @@
       createdAt: Date.now(),
       isStreaming: true,
       blocks: [],
-      statusRail: { text: '思考中...', indicator: 'thinking' },
+      statusRail: { text: '准备中...', indicator: 'loading' },
     };
     messages = [...messages, userMessage, assistantMessage];
     activeAssistantId = assistantMessage.id;
@@ -444,7 +444,7 @@
       createdAt: Date.now(),
       isStreaming: true,
       blocks: [],
-      statusRail: { text: '思考中...', indicator: 'thinking' },
+      statusRail: { text: '准备中...', indicator: 'loading' },
     };
     messages = [...messages, assistantMessage];
     activeAssistantId = assistantMessage.id;

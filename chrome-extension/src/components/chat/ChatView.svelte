@@ -1,8 +1,18 @@
 <script lang="ts">
-  import { Copy, RefreshCw, Download } from '@lucide/svelte';
+  import {
+    Brain,
+    ChevronRight,
+    CircleCheck,
+    CircleX,
+    Copy,
+    Download,
+    RefreshCw,
+    Wrench,
+  } from '@lucide/svelte';
+  import { tick } from 'svelte';
   import { slide } from 'svelte/transition';
   import { SvelteSet } from 'svelte/reactivity';
-  import type { ChatMessage } from '../../types/chat';
+  import type { ChatMessage, ContentBlock } from '../../types/chat';
   import BrandMark from '../common/BrandMark.svelte';
   import Markdown from '../common/Markdown.svelte';
 
@@ -12,6 +22,12 @@
 
   let hiddenErrors = new SvelteSet<string>();
   let scheduledErrors = new SvelteSet<string>();
+  let messageListEl: HTMLDivElement | null = null;
+  let shouldStickToBottom = true;
+  let previousScrollSignature = '';
+  let previousMessageCount = 0;
+
+  const BOTTOM_STICKINESS_PX = 64;
 
   $: {
     messages.forEach((message) => {
@@ -32,6 +48,20 @@
     }
     return -1;
   })();
+
+  $: {
+    const nextScrollSignature = getScrollSignature(messages);
+    if (nextScrollSignature !== previousScrollSignature) {
+      const messageCountChanged = messages.length !== previousMessageCount;
+      previousScrollSignature = nextScrollSignature;
+      previousMessageCount = messages.length;
+
+      const shouldScroll = messageCountChanged || shouldStickToBottom;
+      if (shouldScroll) {
+        void scrollToBottom(messageCountChanged ? 'smooth' : 'auto');
+      }
+    }
+  }
 
   function getBriefError(error: string): string {
     if (!error) return '';
@@ -87,6 +117,128 @@
     }
     return [{ type: 'text' as const, text: message.content || '' }];
   }
+
+  function hasBlockVisibleContent(block: ContentBlock): boolean {
+    if (block.type === 'text' || block.type === 'thinking') {
+      return block.text.trim().length > 0;
+    }
+    if (block.type === 'tool_call') {
+      return (
+        block.name.trim().length > 0 ||
+        Object.keys(block.input).length > 0 ||
+        Boolean(block.partialJson?.trim())
+      );
+    }
+    if (block.type === 'tool_result') {
+      return hasToolResultContent(block.content);
+    }
+    return hasToolResultContent(block.data);
+  }
+
+  function hasAssistantVisibleContent(message: ChatMessage): boolean {
+    if (message.content.trim().length > 0) {
+      return true;
+    }
+    return message.blocks?.some(hasBlockVisibleContent) ?? false;
+  }
+
+  function shouldShowAssistantPlaceholder(message: ChatMessage): boolean {
+    return Boolean(
+      message.role === 'assistant' &&
+      message.isStreaming &&
+      !message.error &&
+      !hasAssistantVisibleContent(message),
+    );
+  }
+
+  function getScrollSignature(items: ChatMessage[]): string {
+    return items
+      .map((message) => {
+        const blockSignature = message.blocks?.map(getBlockScrollSignature).join(',') ?? '';
+        return [
+          message.id,
+          message.role,
+          message.content.length,
+          message.isStreaming ? 'streaming' : 'idle',
+          message.error?.length ?? 0,
+          blockSignature,
+        ].join(':');
+      })
+      .join('|');
+  }
+
+  function getBlockScrollSignature(block: ContentBlock): string {
+    if (block.type === 'text' || block.type === 'thinking') {
+      return `${block.type}:${block.text.length}`;
+    }
+    if (block.type === 'tool_call') {
+      return `tool_call:${block.name}:${formatToolValue(block.input).length}:${block.partialJson?.length ?? 0}`;
+    }
+    if (block.type === 'tool_result') {
+      return `tool_result:${block.status}:${formatToolValue(block.content).length}`;
+    }
+    return `widget:${block.widget_type}:${formatToolValue(block.data).length}`;
+  }
+
+  function normalizeLineEndings(value: string): string {
+    return value.replace(/\r\n?/g, '\n');
+  }
+
+  function formatToolValue(content: unknown): string {
+    if (content === null || content === undefined) {
+      return '';
+    }
+    if (typeof content === 'string') {
+      return normalizeLineEndings(content);
+    }
+    if (
+      typeof content === 'number' ||
+      typeof content === 'boolean' ||
+      typeof content === 'bigint'
+    ) {
+      return String(content);
+    }
+
+    try {
+      return normalizeLineEndings(JSON.stringify(content, null, 2));
+    } catch {
+      return normalizeLineEndings(String(content));
+    }
+  }
+
+  function hasToolResultContent(content: unknown): boolean {
+    if (content === null || content === undefined) {
+      return false;
+    }
+    if (typeof content === 'string') {
+      return content.length > 0;
+    }
+    return true;
+  }
+
+  function isNearBottom(element: HTMLDivElement): boolean {
+    return element.scrollHeight - element.scrollTop - element.clientHeight <= BOTTOM_STICKINESS_PX;
+  }
+
+  function handleMessageListScroll() {
+    if (!messageListEl) return;
+    shouldStickToBottom = isNearBottom(messageListEl);
+  }
+
+  async function scrollToBottom(behavior: 'auto' | 'smooth' = 'auto') {
+    await tick();
+    if (!messageListEl) return;
+
+    requestAnimationFrame(() => {
+      if (!messageListEl) return;
+      const top = messageListEl.scrollHeight;
+      if (typeof messageListEl.scrollTo === 'function') {
+        messageListEl.scrollTo({ top, behavior });
+      } else {
+        messageListEl.scrollTop = top;
+      }
+    });
+  }
 </script>
 
 <section class="flex min-h-0 flex-1 flex-col">
@@ -99,7 +251,11 @@
       </div>
     </div>
   {:else}
-    <div class="message-list kn-scrollbar">
+    <div
+      class="message-list kn-scrollbar"
+      bind:this={messageListEl}
+      onscroll={handleMessageListScroll}
+    >
       {#each messages as message, index (message.id)}
         <article class={`message ${message.role}`}>
           {#if message.role === 'assistant'}
@@ -111,75 +267,94 @@
             </div>
 
             <div class="bubble">
-              {#each getMessageBlocks(message) as block, idx (idx)}
-                <div class="block-item block-type-{block.type} block-idx-{idx}">
-                  {#if block.type === 'text'}
-                    {#if block.text}
-                      <div class="block-text">
-                        <Markdown content={block.text} />
-                      </div>
-                    {/if}
-                  {:else if block.type === 'thinking'}
-                    {#if block.text}
-                      <details class="block-thinking" open={message.isStreaming}>
-                        <summary class="thinking-header">
-                          <span class="thinking-icon">🧠</span>
-                          <span>思考过程</span>
-                        </summary>
-                        <div class="thinking-content">
+              {#if shouldShowAssistantPlaceholder(message)}
+                <div class="assistant-placeholder" aria-label="准备中">
+                  <span></span>
+                  <span></span>
+                  <span></span>
+                </div>
+              {:else}
+                {#each getMessageBlocks(message) as block, idx (idx)}
+                  <div class="block-item block-type-{block.type} block-idx-{idx}">
+                    {#if block.type === 'text'}
+                      {#if block.text}
+                        <div class="block-text">
                           <Markdown content={block.text} />
                         </div>
-                      </details>
-                    {/if}
-                  {:else if block.type === 'tool_call'}
-                    <div class="block-tool-call">
-                      <div class="tool-call-header">
-                        <span class="tool-icon">🛠️</span>
-                        <span>执行工具: <code class="tool-name">{block.name}</code></span>
-                      </div>
-                      {#if block.input && Object.keys(block.input).length > 0}
-                        <pre class="tool-call-input kn-scrollbar"><code
-                            >{JSON.stringify(block.input, null, 2)}</code
-                          ></pre>
-                      {:else if block.partialJson}
-                        <pre class="tool-call-input kn-scrollbar"><code>{block.partialJson}</code
-                          ></pre>
                       {/if}
-                    </div>
-                  {:else if block.type === 'tool_result'}
-                    <div class="block-tool-result" class:error={block.status === 'error'}>
-                      <div class="tool-result-header">
-                        <span class="result-icon">{block.status === 'error' ? '❌' : '✅'}</span>
-                        <span
-                          >工具返回结果 <span
-                            class="status-pill"
-                            class:error={block.status === 'error'}>{block.status}</span
-                          ></span
-                        >
-                      </div>
-                      {#if block.content}
-                        <div class="tool-result-markdown kn-scrollbar">
-                          <Markdown
-                            content={typeof block.content === 'object'
-                              ? '```json\n' + JSON.stringify(block.content, null, 2) + '\n```'
-                              : String(block.content)}
-                          />
+                    {:else if block.type === 'thinking'}
+                      {#if block.text}
+                        <details class="block-thinking" open={message.isStreaming}>
+                          <summary class="thinking-header">
+                            <span class="thinking-title">
+                              <Brain size={14} />
+                              <span>思考过程</span>
+                            </span>
+                            <span class="thinking-hint">
+                              <span>{message.isStreaming ? '生成中' : '详情'}</span>
+                              <ChevronRight size={13} />
+                            </span>
+                          </summary>
+                          <div class="thinking-content">
+                            <Markdown content={block.text} />
+                          </div>
+                        </details>
+                      {/if}
+                    {:else if block.type === 'tool_call'}
+                      <div class="block-tool-call">
+                        <div class="tool-call-header">
+                          <Wrench size={14} />
+                          <span>执行工具: <code class="tool-name">{block.name}</code></span>
                         </div>
-                      {/if}
-                    </div>
-                  {:else if block.type === 'widget'}
-                    <div class="block-widget">
-                      <div class="widget-header">
-                        <span class="widget-icon">🧩</span>
-                        <span>组件: {block.widget_type}</span>
+                        {#if block.input && Object.keys(block.input).length > 0}
+                          <pre class="tool-call-input kn-scrollbar"><code
+                              >{formatToolValue(block.input)}</code
+                            ></pre>
+                        {:else if block.partialJson}
+                          <pre class="tool-call-input kn-scrollbar"><code
+                              >{formatToolValue(block.partialJson)}</code
+                            ></pre>
+                        {/if}
                       </div>
-                      <pre class="widget-data kn-scrollbar"><code
-                          >{JSON.stringify(block.data, null, 2)}</code
-                        ></pre>
-                    </div>
-                  {/if}
-                </div>
-              {/each}
+                    {:else if block.type === 'tool_result'}
+                      <div class="block-tool-result" class:error={block.status === 'error'}>
+                        <div class="tool-result-header">
+                          <span class="result-icon" class:error={block.status === 'error'}>
+                            {#if block.status === 'error'}
+                              <CircleX size={14} />
+                            {:else}
+                              <CircleCheck size={14} />
+                            {/if}
+                          </span>
+                          <span
+                            >工具返回结果 <span
+                              class="status-pill"
+                              class:error={block.status === 'error'}>{block.status}</span
+                            ></span
+                          >
+                        </div>
+                        {#if hasToolResultContent(block.content)}
+                          <pre class="tool-result-output kn-scrollbar"><code
+                              >{formatToolValue(block.content)}</code
+                            ></pre>
+                        {:else}
+                          <div class="tool-result-empty">无返回内容</div>
+                        {/if}
+                      </div>
+                    {:else if block.type === 'widget'}
+                      <div class="block-widget">
+                        <div class="widget-header">
+                          <span class="widget-icon">🧩</span>
+                          <span>组件: {block.widget_type}</span>
+                        </div>
+                        <pre class="widget-data kn-scrollbar"><code
+                            >{formatToolValue(block.data)}</code
+                          ></pre>
+                      </div>
+                    {/if}
+                  </div>
+                {/each}
+              {/if}
             </div>
 
             <!-- Status Tail for Error / Streaming status -->
@@ -355,6 +530,7 @@
 
   .bubble {
     max-width: 100%;
+    min-width: 0;
     font-size: 13.5px;
     line-height: 1.6;
   }
@@ -384,6 +560,48 @@
     gap: 8px;
   }
 
+  .block-item {
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .assistant-placeholder {
+    display: inline-flex;
+    min-height: 24px;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 1px;
+  }
+
+  .assistant-placeholder span {
+    width: 6px;
+    height: 6px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--kn-text-muted) 48%, transparent);
+    animation: placeholderPulse 1.1s ease-in-out infinite;
+  }
+
+  .assistant-placeholder span:nth-child(2) {
+    animation-delay: 120ms;
+  }
+
+  .assistant-placeholder span:nth-child(3) {
+    animation-delay: 240ms;
+  }
+
+  @keyframes placeholderPulse {
+    0%,
+    80%,
+    100% {
+      opacity: 0.35;
+      transform: translateY(0) scale(0.88);
+    }
+    40% {
+      opacity: 0.95;
+      transform: translateY(-2px) scale(1);
+    }
+  }
+
   .block-text {
     width: 100%;
   }
@@ -398,7 +616,8 @@
   }
 
   .thinking-header {
-    padding: 6px 10px;
+    min-height: 34px;
+    padding: 6px 9px 6px 10px;
     font-size: 11.5px;
     font-weight: 600;
     color: var(--kn-text-muted);
@@ -406,12 +625,53 @@
     user-select: none;
     display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: 6px;
     background: color-mix(in srgb, var(--kn-bg-subtle) 10%, var(--kn-bg-raised));
+    transition:
+      background 150ms ease,
+      color 150ms ease;
+  }
+
+  .thinking-header:hover {
+    background: color-mix(in srgb, var(--kn-bg-subtle) 55%, var(--kn-bg-raised));
+    color: var(--kn-text);
   }
 
   .thinking-header::-webkit-details-marker {
     display: none;
+  }
+
+  .thinking-title,
+  .thinking-hint {
+    display: inline-flex;
+    min-width: 0;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .thinking-title {
+    color: var(--kn-text);
+  }
+
+  .thinking-title :global(svg) {
+    flex: 0 0 auto;
+    color: var(--kn-accent);
+  }
+
+  .thinking-hint {
+    flex: 0 0 auto;
+    color: var(--kn-text-muted);
+    font-size: 10.5px;
+    font-weight: 600;
+  }
+
+  .thinking-hint :global(svg) {
+    transition: transform 160ms ease;
+  }
+
+  .block-thinking[open] .thinking-hint :global(svg) {
+    transform: rotate(90deg);
   }
 
   .thinking-content {
@@ -442,6 +702,11 @@
     border-bottom: 1px dashed color-mix(in srgb, var(--kn-border) 40%, transparent);
   }
 
+  .tool-call-header :global(svg) {
+    flex: 0 0 auto;
+    color: var(--kn-accent);
+  }
+
   .tool-name {
     font-family: monospace;
     background: var(--kn-bg-subtle);
@@ -451,13 +716,19 @@
   }
 
   .tool-call-input {
+    display: block;
+    width: 100%;
+    max-width: 100%;
     margin: 0;
     padding: 8px 10px;
     font-size: 11px;
     background: color-mix(in srgb, var(--kn-bg-subtle) 10%, var(--kn-bg-raised));
     max-height: 120px;
-    overflow-y: auto;
-    font-family: monospace;
+    overflow: auto;
+    font-family: 'Cascadia Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+    line-height: 1.6;
+    tab-size: 2;
+    white-space: pre;
   }
 
   .block-tool-result {
@@ -485,6 +756,16 @@
     border-bottom: 1px dashed color-mix(in srgb, var(--kn-border) 40%, transparent);
   }
 
+  .result-icon {
+    display: inline-flex;
+    flex: 0 0 auto;
+    color: color-mix(in srgb, #168a4a 88%, var(--kn-text));
+  }
+
+  .result-icon.error {
+    color: var(--kn-danger);
+  }
+
   .status-pill {
     font-size: 9.5px;
     padding: 1px 4px;
@@ -499,13 +780,34 @@
     color: var(--kn-danger);
   }
 
-  .tool-result-markdown {
-    padding: 10px 12px;
+  .tool-result-output {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    margin: 0;
+    padding: 10px 12px 12px;
     background: color-mix(in srgb, var(--kn-bg-subtle) 10%, var(--kn-bg-raised));
     max-height: 250px;
-    overflow-y: auto;
+    overflow: auto;
     border-top: 1px dashed color-mix(in srgb, var(--kn-border) 40%, transparent);
-    font-size: 12.5px;
+    font-family: 'Cascadia Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+    font-size: 11.5px;
+    line-height: 1.65;
+    tab-size: 2;
+    white-space: pre;
+  }
+
+  .tool-result-output code,
+  .tool-call-input code,
+  .widget-data code {
+    white-space: inherit;
+  }
+
+  .tool-result-empty {
+    padding: 10px 12px;
+    border-top: 1px dashed color-mix(in srgb, var(--kn-border) 40%, transparent);
+    color: var(--kn-text-muted);
+    font-size: 12px;
   }
 
   .block-widget {
@@ -529,13 +831,26 @@
   }
 
   .widget-data {
+    display: block;
+    width: 100%;
+    max-width: 100%;
     margin: 0;
     padding: 8px 10px;
     font-size: 11px;
     background: color-mix(in srgb, var(--kn-bg-subtle) 10%, var(--kn-bg-raised));
     max-height: 150px;
-    overflow-y: auto;
-    font-family: monospace;
+    overflow: auto;
+    font-family: 'Cascadia Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+    line-height: 1.6;
+    tab-size: 2;
+    white-space: pre;
+  }
+
+  .tool-call-input::-webkit-scrollbar,
+  .tool-result-output::-webkit-scrollbar,
+  .widget-data::-webkit-scrollbar {
+    width: 7px;
+    height: 7px;
   }
 
   .tool-icon-spinning {
