@@ -6,6 +6,8 @@ import { KnovanaAgent } from "../agent/client";
 import { SessionWarmPool } from "../agent/pool";
 import { SYSTEM_PROMPT } from "../agent/prompts/system-prompt";
 import { KnovanaSessionStore } from "../agent/session-store";
+import { config } from "../config";
+import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import type {
   ChatSession,
   ChatSessionListItem,
@@ -17,6 +19,35 @@ export interface ChatInput {
   session_id?: string;
 }
 
+type PspChunk = { event: string; data: any };
+
+interface ChatAgent {
+  chat(
+    message: string,
+    systemPrompt: string,
+    sessionId?: string,
+  ): AsyncGenerator<SDKMessage>;
+}
+
+type ChatAgentFactory = (userId: string, kbRoot: string) => ChatAgent;
+
+interface PspConversionState {
+  textChunks: string[];
+  assistantTexts: string[];
+  nextBlockIndex: number;
+  sdkIndexToPspIndex: Map<number, number>;
+  contentBlocksCache: Map<number, any>;
+  currentAssistantHadStreamBlocks: boolean;
+}
+
+interface StreamAgentResponseInput {
+  sdkStream: AsyncIterable<SDKMessage>;
+  userMessage: string;
+  sessionId?: string;
+  dbInitialized: boolean;
+  emitSessionCreated: boolean;
+}
+
 export class ChatService {
   private readonly sessionRepo = new SessionRepository();
   private readonly messageRepo = new MessageRepository();
@@ -24,14 +55,16 @@ export class ChatService {
   constructor(
     private readonly userId: string,
     private readonly kbRoot: string,
+    private readonly agentFactory: ChatAgentFactory = (userId, kbRoot) =>
+      new KnovanaAgent(userId, kbRoot),
   ) {}
 
   /**
    * Orchestrates the agent chat execution, yielding Prism Stream Protocol (PSP) v1 events.
    * Compiles the text response to log in SQLite once finished.
    */
-  async *chat(input: ChatInput): AsyncGenerator<{ event: string; data: any }> {
-    let sessionId = input.session_id;
+  async *chat(input: ChatInput): AsyncGenerator<PspChunk> {
+    const sessionId = input.session_id;
 
     // Check if the session actually has entries in the session store to decide whether to resume
     let shouldResume = false;
@@ -44,205 +77,32 @@ export class ChatService {
     }
 
     if (shouldResume && sessionId) {
-      // Ensure the session exists in SQLite before recording messages to avoid FOREIGN KEY errors
-      const session = this.sessionRepo.get(sessionId);
-      if (!session) {
-        this.sessionRepo.create(sessionId, this.userId);
-        const title = input.message.slice(0, 50).trim() || "New Web Capture";
-        this.sessionRepo.updateTitle(sessionId, title);
-      } else {
-        this.sessionRepo.updateTimestamp(sessionId);
-      }
-
-      // Append the single user message to SQLite
-      this.messageRepo.create(sessionId, "user", input.message);
+      this.ensureSessionForUserMessage(
+        sessionId,
+        input.message,
+        "New Web Capture",
+      );
     }
 
-    const agent = new KnovanaAgent(this.userId, this.kbRoot);
+    const agent = this.agentFactory(this.userId, this.kbRoot);
     const sdkStream = agent.chat(
       input.message,
       SYSTEM_PROMPT,
       shouldResume ? sessionId : undefined,
     );
 
-    const assistantMessageId = `msg_${randomUUID().replace(/-/g, "").slice(0, 12)}`;
-
-    // Yield initial PSP message_start event
-    yield {
-      event: "message_start",
-      data: {
-        type: "message_start",
-        message: {
-          id: assistantMessageId,
-          role: "assistant",
-          content: [],
-          created_at: new Date().toISOString(),
-        },
-      },
-    };
-
-    const textChunks: string[] = [];
-    let blockIndexOffset = 0;
-    const contentBlocksCache: any[] = [];
-
-    let dbInitialized = shouldResume;
-
-    for await (const msg of sdkStream) {
-      if (!dbInitialized) {
-        const generatedId =
-          (msg as any).session_id || (msg as any).message?.session_id;
-        if (generatedId) {
-          sessionId = generatedId;
-
-          // Ensure the session exists in SQLite
-          this.sessionRepo.create(sessionId!, this.userId);
-          const title = input.message.slice(0, 50).trim() || "New Web Capture";
-          this.sessionRepo.updateTitle(sessionId!, title);
-
-          // Write history to SQLite
-          this.messageRepo.create(sessionId!, "user", input.message);
-          dbInitialized = true;
-
-          // Yield the session_created event to the client
-          yield {
-            event: "session_created",
-            data: {
-              sessionId,
-            },
-          };
-        }
-      }
-
-      if (msg.type === "stream_event") {
-        const ev = msg.event;
-
-        if (ev.type === "content_block_start") {
-          const block: any = { ...ev.content_block };
-          if (block.type === "tool_use") {
-            block.type = "tool_call";
-            block.input = {};
-          } else if (block.type === "text") {
-            block.text = "";
-          }
-          contentBlocksCache[ev.index] = block;
-
-          yield {
-            event: "content_block_start",
-            data: {
-              type: "content_block_start",
-              index: ev.index,
-              content_block: block,
-            },
-          };
-        } else if (ev.type === "content_block_delta") {
-          const block = contentBlocksCache[ev.index];
-          if (block) {
-            if (ev.delta.type === "text_delta") {
-              textChunks.push(ev.delta.text);
-              block.text = (block.text || "") + ev.delta.text;
-            } else if (ev.delta.type === "input_json_delta") {
-              block.partial_json =
-                (block.partial_json || "") + ev.delta.partial_json;
-            }
-          }
-
-          yield {
-            event: "content_block_delta",
-            data: {
-              type: "content_block_delta",
-              index: ev.index,
-              delta: ev.delta,
-            },
-          };
-        } else if (ev.type === "content_block_stop") {
-          const block = contentBlocksCache[ev.index] || {
-            type: "text",
-            text: "",
-          };
-          if (block.type === "tool_call" && block.partial_json) {
-            try {
-              block.input = JSON.parse(block.partial_json);
-            } catch (e) {
-              // Fallback if incomplete
-            }
-            delete block.partial_json;
-          }
-
-          yield {
-            event: "content_block_stop",
-            data: {
-              type: "content_block_stop",
-              index: ev.index,
-              content_block: block,
-            },
-          };
-        } else if (ev.type === "message_delta") {
-          yield {
-            event: "message_delta",
-            data: {
-              type: "message_delta",
-              delta: {
-                stop_reason: ev.delta.stop_reason || "end_turn",
-              },
-              usage: (ev as any).usage || (msg as any).usage,
-            },
-          };
-        }
-      } else if (msg.type === "user") {
-        // Intercept tool outputs sent back to the LLM to emit tool_result events
-        const contentBlocks = msg.message.content || [];
-        for (let i = 0; i < contentBlocks.length; i++) {
-          const block = contentBlocks[i];
-          if (typeof block !== "string" && block.type === "tool_result") {
-            const toolCallId = block.tool_use_id;
-            const index = 100 + blockIndexOffset++;
-
-            yield {
-              event: "content_block_start",
-              data: {
-                type: "content_block_start",
-                index,
-                content_block: {
-                  type: "tool_result",
-                  tool_call_id: toolCallId,
-                },
-              },
-            };
-
-            yield {
-              event: "content_block_stop",
-              data: {
-                type: "content_block_stop",
-                index,
-                content_block: {
-                  type: "tool_result",
-                  tool_call_id: toolCallId,
-                  status: block.is_error ? "error" : "success",
-                  content: block.content,
-                },
-              },
-            };
-          }
-        }
-      }
-    }
-
-    // Save assistant's compiled reply to the database
-    const fullAssistantResponse = textChunks.join("");
-    this.messageRepo.create(sessionId!, "assistant", fullAssistantResponse);
-
-    // Yield final PSP message_end event
-    yield {
-      event: "message_end",
-      data: {
-        type: "message_end",
-      },
-    };
+    yield* this.streamAgentResponse({
+      sdkStream,
+      userMessage: input.message,
+      sessionId,
+      dbInitialized: shouldResume,
+      emitSessionCreated: !shouldResume,
+    });
   }
 
   createSession(title?: string, context?: any): ChatSession {
     const sessionId = randomUUID();
-    const session = this.sessionRepo.create(sessionId, this.userId, context);
+    this.sessionRepo.create(sessionId, this.userId, context);
     if (title) {
       this.sessionRepo.updateTitle(sessionId, title);
     }
@@ -303,9 +163,7 @@ export class ChatService {
     }
   }
 
-
-
-  async *regenerate(sessionId: string): AsyncGenerator<{ event: string; data: any }> {
+  async *regenerate(sessionId: string): AsyncGenerator<PspChunk> {
     // 1. Get the last user message and assistant message in SQLite
     const messages = this.messageRepo.listBySession(sessionId);
     const lastUserMsg = [...messages].reverse().find((m) => m.role === "user");
@@ -333,17 +191,359 @@ export class ChatService {
     this.sessionRepo.updateTimestamp(sessionId);
 
     // 5. Query the agent
-    const agent = new KnovanaAgent(this.userId, this.kbRoot);
-    const sdkStream = agent.chat(
-      lastUserMsg.content,
-      SYSTEM_PROMPT,
-      sessionId,
-    );
+    const agent = this.agentFactory(this.userId, this.kbRoot);
+    const sdkStream = agent.chat(lastUserMsg.content, SYSTEM_PROMPT, sessionId);
 
+    yield* this.streamAgentResponse({
+      sdkStream,
+      userMessage: lastUserMsg.content,
+      sessionId,
+      dbInitialized: true,
+      emitSessionCreated: false,
+    });
+  }
+
+  private async *streamAgentResponse({
+    sdkStream,
+    userMessage,
+    sessionId,
+    dbInitialized,
+    emitSessionCreated,
+  }: StreamAgentResponseInput): AsyncGenerator<PspChunk> {
+    const messageStart = this.createMessageStartChunk();
+    this.logPspChunk("initial", messageStart);
+    yield messageStart;
+
+    const state = this.createPspConversionState();
+
+    for await (const msg of sdkStream) {
+      this.logSdkMessage(msg);
+      const generatedSessionId = this.getSdkSessionId(msg);
+      if (generatedSessionId && !sessionId) {
+        sessionId = generatedSessionId;
+      }
+
+      if (!dbInitialized && generatedSessionId) {
+        sessionId = generatedSessionId;
+        this.ensureSessionForUserMessage(sessionId, userMessage, "New Chat");
+        dbInitialized = true;
+
+        if (emitSessionCreated) {
+          const sessionCreated = {
+            event: "session_created",
+            data: {
+              type: "session_created",
+              session_id: sessionId,
+              sessionId,
+            },
+          };
+          this.logPspChunk("session", sessionCreated);
+          yield sessionCreated;
+        }
+      }
+
+      const chunks = Array.from(this.convertSdkMessageToPsp(msg, state));
+      if (
+        chunks.length === 0 &&
+        config.agentTrace &&
+        this.shouldLogEmptyConversion(msg)
+      ) {
+        console.log("[ChatService] SDK message produced no PSP chunks", {
+          sdk: this.summarizeSdkMessage(msg),
+        });
+      }
+      for (const chunk of chunks) {
+        this.logPspChunk("converted", chunk);
+        yield chunk;
+      }
+    }
+
+    if (!sessionId) {
+      throw new Error("Agent stream ended before providing a session id.");
+    }
+
+    const fullAssistantResponse =
+      state.assistantTexts.length > 0
+        ? state.assistantTexts.join("")
+        : state.textChunks.join("");
+    this.messageRepo.create(sessionId, "assistant", fullAssistantResponse);
+
+    const messageEnd = {
+      event: "message_end",
+      data: {
+        type: "message_end",
+      },
+    };
+    this.logPspChunk("final", messageEnd);
+    yield messageEnd;
+  }
+
+  private *convertSdkMessageToPsp(
+    msg: SDKMessage,
+    state: PspConversionState,
+  ): Generator<PspChunk> {
+    if (msg.type === "system") {
+      const status = this.toStatusChunk(msg);
+      if (status) {
+        yield status;
+      }
+      return;
+    }
+
+    if (msg.type === "assistant") {
+      if (msg.error || (msg as any).message?.model === "<synthetic>") {
+        const errorText =
+          this.extractTextFromContent((msg as any).message?.content) ||
+          msg.error ||
+          "Assistant error";
+        throw new Error(errorText);
+      }
+
+      const content = (msg as any).message?.content;
+      const assistantText = this.extractTextFromContent(content);
+      if (assistantText) {
+        state.assistantTexts.push(assistantText);
+      }
+
+      const hadStreamBlocks = state.currentAssistantHadStreamBlocks;
+      if (!hadStreamBlocks) {
+        yield* this.emitCompleteAssistantBlocks(content, state);
+        this.resetCurrentAssistantStream(state);
+      }
+      return;
+    }
+
+    if (msg.type === "result" && (msg as any).is_error) {
+      const errors = (msg as any).errors;
+      throw new Error(
+        (Array.isArray(errors) && errors.length > 0
+          ? errors.join("\n")
+          : (msg as any).result) || "API error occurred during execution",
+      );
+    }
+
+    if (msg.type === "stream_event") {
+      yield* this.convertStreamEventToPsp((msg as any).event, state);
+      return;
+    }
+
+    if (msg.type === "user") {
+      yield* this.emitToolResultBlocks((msg as any).message?.content, state);
+    }
+  }
+
+  private *convertStreamEventToPsp(
+    ev: any,
+    state: PspConversionState,
+  ): Generator<PspChunk> {
+    if (ev.type === "message_start") {
+      this.resetCurrentAssistantStream(state);
+      return;
+    }
+
+    if (ev.type === "content_block_start") {
+      const index = this.allocatePspIndex(state, ev.index);
+      const block = this.toPspBlock(ev.content_block, "start");
+      state.contentBlocksCache.set(
+        index,
+        this.toPspBlock(ev.content_block, "final"),
+      );
+      state.currentAssistantHadStreamBlocks = true;
+
+      yield {
+        event: "content_block_start",
+        data: {
+          type: "content_block_start",
+          index,
+          content_block: block,
+        },
+      };
+      return;
+    }
+
+    if (ev.type === "content_block_delta") {
+      const delta = this.normalizeDelta(ev.delta);
+      if (!delta) {
+        return;
+      }
+
+      let index = state.sdkIndexToPspIndex.get(ev.index);
+      if (index === undefined) {
+        const fallbackBlock = this.createFallbackBlockForDelta(delta);
+        index = this.allocatePspIndex(state, ev.index);
+        state.contentBlocksCache.set(index, fallbackBlock);
+        state.currentAssistantHadStreamBlocks = true;
+        yield {
+          event: "content_block_start",
+          data: {
+            type: "content_block_start",
+            index,
+            content_block: { ...fallbackBlock },
+          },
+        };
+      }
+
+      const block = state.contentBlocksCache.get(index);
+      if (block) {
+        this.applyDeltaToCachedBlock(block, delta, state);
+      }
+
+      yield {
+        event: "content_block_delta",
+        data: {
+          type: "content_block_delta",
+          index,
+          delta,
+        },
+      };
+      return;
+    }
+
+    if (ev.type === "content_block_stop") {
+      let index = state.sdkIndexToPspIndex.get(ev.index);
+      if (index === undefined) {
+        index = this.allocatePspIndex(state, ev.index);
+        state.contentBlocksCache.set(index, { type: "text", text: "" });
+        state.currentAssistantHadStreamBlocks = true;
+        yield {
+          event: "content_block_start",
+          data: {
+            type: "content_block_start",
+            index,
+            content_block: { type: "text", text: "" },
+          },
+        };
+      }
+
+      const block = state.contentBlocksCache.get(index) || {
+        type: "text",
+        text: "",
+      };
+      this.finalizeCachedBlock(block);
+
+      yield {
+        event: "content_block_stop",
+        data: {
+          type: "content_block_stop",
+          index,
+          content_block: block,
+        },
+      };
+      return;
+    }
+
+    if (ev.type === "message_delta") {
+      yield {
+        event: "message_delta",
+        data: {
+          type: "message_delta",
+          delta: {
+            stop_reason: ev.delta?.stop_reason || "end_turn",
+          },
+          usage: ev.usage,
+        },
+      };
+    }
+  }
+
+  private *emitCompleteAssistantBlocks(
+    content: unknown,
+    state: PspConversionState,
+  ): Generator<PspChunk> {
+    if (typeof content === "string") {
+      const block = { type: "text", text: content };
+      yield* this.emitCompleteBlock({ type: "text", text: "" }, block, state);
+      return;
+    }
+
+    const contentBlocks = Array.isArray(content) ? content : [];
+
+    for (const rawBlock of contentBlocks) {
+      if (typeof rawBlock === "string") {
+        const block = { type: "text", text: rawBlock };
+        yield* this.emitCompleteBlock(block, block, state);
+        continue;
+      }
+
+      const startBlock = this.toPspBlock(rawBlock, "start");
+      const finalBlock = this.toPspBlock(rawBlock, "final");
+      yield* this.emitCompleteBlock(startBlock, finalBlock, state);
+    }
+  }
+
+  private *emitCompleteBlock(
+    startBlock: any,
+    finalBlock: any,
+    state: PspConversionState,
+  ): Generator<PspChunk> {
+    const index = state.nextBlockIndex++;
+    this.finalizeCachedBlock(finalBlock);
+
+    yield {
+      event: "content_block_start",
+      data: {
+        type: "content_block_start",
+        index,
+        content_block: startBlock,
+      },
+    };
+
+    yield {
+      event: "content_block_stop",
+      data: {
+        type: "content_block_stop",
+        index,
+        content_block: finalBlock,
+      },
+    };
+  }
+
+  private *emitToolResultBlocks(
+    content: unknown,
+    state: PspConversionState,
+  ): Generator<PspChunk> {
+    const contentBlocks = Array.isArray(content) ? content : [];
+
+    for (const block of contentBlocks) {
+      if (typeof block === "string" || block.type !== "tool_result") {
+        continue;
+      }
+
+      const index = state.nextBlockIndex++;
+      const toolCallId = block.tool_use_id;
+
+      yield {
+        event: "content_block_start",
+        data: {
+          type: "content_block_start",
+          index,
+          content_block: {
+            type: "tool_result",
+            tool_call_id: toolCallId,
+          },
+        },
+      };
+
+      yield {
+        event: "content_block_stop",
+        data: {
+          type: "content_block_stop",
+          index,
+          content_block: {
+            type: "tool_result",
+            tool_call_id: toolCallId,
+            status: block.is_error ? "error" : "success",
+            content: block.content,
+          },
+        },
+      };
+    }
+  }
+
+  private createMessageStartChunk(): PspChunk {
     const assistantMessageId = `msg_${randomUUID().replace(/-/g, "").slice(0, 12)}`;
 
-    // Yield initial PSP message_start event
-    yield {
+    return {
       event: "message_start",
       data: {
         type: "message_start",
@@ -355,140 +555,399 @@ export class ChatService {
         },
       },
     };
+  }
 
-    const textChunks: string[] = [];
-    let blockIndexOffset = 0;
-    const contentBlocksCache: any[] = [];
-
-    for await (const msg of sdkStream) {
-      if (msg.type === "stream_event") {
-        const ev = msg.event;
-
-        if (ev.type === "content_block_start") {
-          const block: any = { ...ev.content_block };
-          if (block.type === "tool_use") {
-            block.type = "tool_call";
-            block.input = {};
-          } else if (block.type === "text") {
-            block.text = "";
-          }
-          contentBlocksCache[ev.index] = block;
-
-          yield {
-            event: "content_block_start",
-            data: {
-              type: "content_block_start",
-              index: ev.index,
-              content_block: block,
-            },
-          };
-        } else if (ev.type === "content_block_delta") {
-          const block = contentBlocksCache[ev.index];
-          if (block) {
-            if (ev.delta.type === "text_delta") {
-              textChunks.push(ev.delta.text);
-              block.text = (block.text || "") + ev.delta.text;
-            } else if (ev.delta.type === "input_json_delta") {
-              block.partial_json =
-                (block.partial_json || "") + ev.delta.partial_json;
-            }
-          }
-
-          yield {
-            event: "content_block_delta",
-            data: {
-              type: "content_block_delta",
-              index: ev.index,
-              delta: ev.delta,
-            },
-          };
-        } else if (ev.type === "content_block_stop") {
-          const block = contentBlocksCache[ev.index] || {
-            type: "text",
-            text: "",
-          };
-          if (block.type === "tool_call" && block.partial_json) {
-            try {
-              block.input = JSON.parse(block.partial_json);
-            } catch (e) {
-              // Fallback
-            }
-            delete block.partial_json;
-          }
-
-          yield {
-            event: "content_block_stop",
-            data: {
-              type: "content_block_stop",
-              index: ev.index,
-              content_block: block,
-            },
-          };
-        } else if (ev.type === "message_delta") {
-          yield {
-            event: "message_delta",
-            data: {
-              type: "message_delta",
-              delta: {
-                stop_reason: ev.delta.stop_reason || "end_turn",
-              },
-              usage: (ev as any).usage || (msg as any).usage,
-            },
-          };
-        }
-      } else if (msg.type === "user") {
-        const contentBlocks = msg.message.content || [];
-        for (let i = 0; i < contentBlocks.length; i++) {
-          const block = contentBlocks[i];
-          if (typeof block !== "string" && block.type === "tool_result") {
-            const toolCallId = block.tool_use_id;
-            const index = 100 + blockIndexOffset++;
-
-            yield {
-              event: "content_block_start",
-              data: {
-                type: "content_block_start",
-                index,
-                content_block: {
-                  type: "tool_result",
-                  tool_call_id: toolCallId,
-                },
-              },
-            };
-
-            yield {
-              event: "content_block_stop",
-              data: {
-                type: "content_block_stop",
-                index,
-                content_block: {
-                  type: "tool_result",
-                  tool_call_id: toolCallId,
-                  status: block.is_error ? "error" : "success",
-                  content: block.content,
-                },
-              },
-            };
-          }
-        }
-      }
-    }
-
-    const fullAssistantResponse = textChunks.join("");
-    this.messageRepo.create(sessionId, "assistant", fullAssistantResponse);
-
-    yield {
-      event: "message_end",
-      data: {
-        type: "message_end",
-      },
+  private createPspConversionState(): PspConversionState {
+    return {
+      textChunks: [],
+      assistantTexts: [],
+      nextBlockIndex: 0,
+      sdkIndexToPspIndex: new Map(),
+      contentBlocksCache: new Map(),
+      currentAssistantHadStreamBlocks: false,
     };
   }
 
-  private pruneSessionStore(
+  private ensureSessionForUserMessage(
     sessionId: string,
-    k: number,
+    message: string,
+    fallbackTitle: string,
   ): void {
+    const session = this.sessionRepo.get(sessionId);
+    if (!session) {
+      this.sessionRepo.create(sessionId, this.userId);
+      const title = message.slice(0, 50).trim() || fallbackTitle;
+      this.sessionRepo.updateTitle(sessionId, title);
+    } else {
+      this.sessionRepo.updateTimestamp(sessionId);
+    }
+
+    this.messageRepo.create(sessionId, "user", message);
+  }
+
+  private toStatusChunk(msg: any): PspChunk | null {
+    if (msg.subtype === "init") {
+      return {
+        event: "status",
+        data: {
+          type: "status",
+          text: `正在启动智能助手 (模型: ${msg.model || "claude"})...`,
+          indicator: "loading",
+        },
+      };
+    }
+
+    if (msg.subtype === "status" && msg.status === "requesting") {
+      return {
+        event: "status",
+        data: {
+          type: "status",
+          text: "正在连接 API...",
+          indicator: "thinking",
+        },
+      };
+    }
+
+    if (msg.subtype === "api_retry") {
+      return {
+        event: "status",
+        data: {
+          type: "status",
+          text: `API 连接失败，正在进行第 ${msg.attempt}/${msg.max_retries} 次重试...`,
+          indicator: "loading",
+        },
+      };
+    }
+
+    if (msg.subtype === "hook_started") {
+      return {
+        event: "status",
+        data: {
+          type: "status",
+          text: "正在准备智能助手运行环境...",
+          indicator: "loading",
+        },
+      };
+    }
+
+    if (msg.subtype === "hook_response" && msg.outcome === "error") {
+      return {
+        event: "status",
+        data: {
+          type: "status",
+          text: "智能助手运行环境准备时遇到问题，正在继续尝试...",
+          indicator: "loading",
+        },
+      };
+    }
+
+    return null;
+  }
+
+  private getSdkSessionId(msg: SDKMessage): string | undefined {
+    return (msg as any).session_id || (msg as any).message?.session_id;
+  }
+
+  private logSdkMessage(msg: SDKMessage): void {
+    if (!config.agentTrace) {
+      return;
+    }
+
+    console.log(
+      "[ChatService] SDK -> PSP input",
+      this.summarizeSdkMessage(msg),
+    );
+  }
+
+  private logPspChunk(stage: string, chunk: PspChunk): void {
+    if (!config.agentTrace) {
+      return;
+    }
+
+    console.log("[ChatService] PSP output", {
+      stage,
+      ...this.summarizePspChunk(chunk),
+    });
+  }
+
+  private shouldLogEmptyConversion(msg: SDKMessage): boolean {
+    const anyMsg = msg as any;
+
+    if (anyMsg.type === "system") {
+      return false;
+    }
+
+    if (
+      anyMsg.type === "stream_event" &&
+      (anyMsg.event?.type === "message_start" ||
+        anyMsg.event?.type === "message_stop")
+    ) {
+      return false;
+    }
+
+    if (anyMsg.type === "result" && !anyMsg.is_error) {
+      return false;
+    }
+
+    return true;
+  }
+
+  private summarizeSdkMessage(msg: SDKMessage): Record<string, unknown> {
+    const anyMsg = msg as any;
+    const summary: Record<string, unknown> = {
+      type: anyMsg.type,
+      session_id: anyMsg.session_id,
+    };
+
+    if (anyMsg.type === "system") {
+      summary.subtype = anyMsg.subtype;
+      summary.status = anyMsg.status;
+      summary.model = anyMsg.model;
+      summary.attempt = anyMsg.attempt;
+      summary.max_retries = anyMsg.max_retries;
+      return summary;
+    }
+
+    if (anyMsg.type === "stream_event") {
+      summary.event_type = anyMsg.event?.type;
+      summary.index = anyMsg.event?.index;
+      summary.delta_type = anyMsg.event?.delta?.type;
+      summary.block_type = anyMsg.event?.content_block?.type;
+      summary.text_length =
+        anyMsg.event?.delta?.text?.length ??
+        anyMsg.event?.delta?.thinking?.length;
+      summary.partial_json_length = anyMsg.event?.delta?.partial_json?.length;
+      return summary;
+    }
+
+    if (anyMsg.type === "assistant" || anyMsg.type === "user") {
+      const content = anyMsg.message?.content;
+      summary.model = anyMsg.message?.model;
+      summary.stop_reason = anyMsg.message?.stop_reason;
+      summary.content = this.summarizeContent(content);
+      return summary;
+    }
+
+    if (anyMsg.type === "result") {
+      summary.is_error = anyMsg.is_error;
+      summary.subtype = anyMsg.subtype;
+    }
+
+    return summary;
+  }
+
+  private summarizePspChunk(chunk: PspChunk): Record<string, unknown> {
+    const data = chunk.data || {};
+    const summary: Record<string, unknown> = {
+      event: chunk.event,
+      type: data.type,
+    };
+
+    if (typeof data.index === "number") {
+      summary.index = data.index;
+    }
+    if (data.content_block) {
+      summary.block = this.summarizeBlock(data.content_block);
+    }
+    if (data.delta) {
+      summary.delta_type = data.delta.type;
+      summary.text_length =
+        data.delta.text?.length ?? data.delta.thinking?.length;
+      summary.partial_json_length = data.delta.partial_json?.length;
+    }
+    if (data.text) {
+      summary.status_text = data.text;
+    }
+    if (data.delta?.stop_reason) {
+      summary.stop_reason = data.delta.stop_reason;
+    }
+
+    return summary;
+  }
+
+  private summarizeContent(content: unknown): unknown {
+    if (typeof content === "string") {
+      return { kind: "string", length: content.length };
+    }
+
+    if (!Array.isArray(content)) {
+      return { kind: typeof content };
+    }
+
+    return content.map((block) => this.summarizeBlock(block));
+  }
+
+  private summarizeBlock(block: unknown): Record<string, unknown> {
+    if (!block || typeof block !== "object") {
+      return { kind: typeof block };
+    }
+
+    const anyBlock = block as any;
+    return {
+      type: anyBlock.type,
+      id: anyBlock.id || anyBlock.tool_use_id || anyBlock.tool_call_id,
+      name: anyBlock.name,
+      text_length: anyBlock.text?.length ?? anyBlock.thinking?.length,
+      content_length:
+        typeof anyBlock.content === "string"
+          ? anyBlock.content.length
+          : undefined,
+      is_error: anyBlock.is_error,
+      status: anyBlock.status,
+    };
+  }
+
+  private allocatePspIndex(
+    state: PspConversionState,
+    sdkIndex: number,
+  ): number {
+    const index = state.nextBlockIndex++;
+    state.sdkIndexToPspIndex.set(sdkIndex, index);
+    return index;
+  }
+
+  private resetCurrentAssistantStream(state: PspConversionState): void {
+    state.sdkIndexToPspIndex = new Map();
+    state.currentAssistantHadStreamBlocks = false;
+  }
+
+  private toPspBlock(rawBlock: any, phase: "start" | "final"): any {
+    if (!rawBlock || typeof rawBlock !== "object") {
+      return { type: "text", text: "" };
+    }
+
+    if (this.isToolUseBlock(rawBlock)) {
+      return {
+        type: "tool_call",
+        id: rawBlock.id || rawBlock.tool_use_id || "",
+        name: rawBlock.name || rawBlock.tool_name || rawBlock.type,
+        input: phase === "start" ? {} : rawBlock.input || {},
+      };
+    }
+
+    if (rawBlock.type === "text") {
+      return {
+        ...rawBlock,
+        text: phase === "start" ? "" : rawBlock.text || "",
+      };
+    }
+
+    if (rawBlock.type === "thinking") {
+      return {
+        type: "thinking",
+        text: phase === "start" ? "" : rawBlock.thinking || rawBlock.text || "",
+      };
+    }
+
+    return { ...rawBlock };
+  }
+
+  private isToolUseBlock(block: any): boolean {
+    return (
+      block.type === "tool_use" ||
+      block.type === "server_tool_use" ||
+      block.type === "mcp_tool_use"
+    );
+  }
+
+  private createFallbackBlockForDelta(delta: any): any {
+    if (delta?.type === "thinking_delta") {
+      return { type: "thinking", text: "" };
+    }
+
+    if (delta?.type === "input_json_delta") {
+      return { type: "tool_call", id: "", name: "", input: {} };
+    }
+
+    return { type: "text", text: "" };
+  }
+
+  private normalizeDelta(delta: any): any | undefined {
+    if (!delta || typeof delta !== "object") {
+      return undefined;
+    }
+
+    if (delta.type === "text_delta") {
+      return {
+        type: "text_delta",
+        text: delta.text || "",
+      };
+    }
+
+    if (delta.type === "thinking_delta") {
+      return {
+        type: "thinking_delta",
+        text: delta.text || delta.thinking || "",
+      };
+    }
+
+    if (delta.type === "input_json_delta") {
+      return {
+        type: "input_json_delta",
+        partial_json: delta.partial_json || "",
+      };
+    }
+
+    return undefined;
+  }
+
+  private applyDeltaToCachedBlock(
+    block: any,
+    delta: any,
+    state: PspConversionState,
+  ): void {
+    if (delta.type === "text_delta") {
+      const text = delta.text || "";
+      state.textChunks.push(text);
+      block.text = `${block.text || ""}${text}`;
+      return;
+    }
+
+    if (delta.type === "thinking_delta") {
+      const text = delta.text || delta.thinking || "";
+      block.text = `${block.text || ""}${text}`;
+      return;
+    }
+
+    if (delta.type === "input_json_delta") {
+      block.partial_json = `${block.partial_json || ""}${delta.partial_json || ""}`;
+    }
+  }
+
+  private finalizeCachedBlock(block: any): void {
+    if (block.type !== "tool_call" || !block.partial_json) {
+      return;
+    }
+
+    try {
+      block.input = JSON.parse(block.partial_json);
+    } catch {
+      block.input = block.input || {};
+    }
+    delete block.partial_json;
+  }
+
+  private extractTextFromContent(content: unknown): string {
+    if (typeof content === "string") {
+      return content;
+    }
+
+    if (!Array.isArray(content)) {
+      return "";
+    }
+
+    return content
+      .filter(
+        (block): block is { type: "text"; text?: string } =>
+          typeof block === "object" &&
+          block !== null &&
+          (block as any).type === "text",
+      )
+      .map((block) => block.text || "")
+      .join("");
+  }
+
+  private pruneSessionStore(sessionId: string, k: number): void {
     const db = getDatabase();
 
     // Find all entries for this session in order to locate the (k + 1)-th 'user' type entry
@@ -513,7 +972,7 @@ export class ChatService {
             break;
           }
         }
-      } catch (err) {
+      } catch {
         // Ignore JSON parsing issues
       }
     }

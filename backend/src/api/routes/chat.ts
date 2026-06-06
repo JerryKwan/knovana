@@ -209,13 +209,16 @@ const regenerateRoute = createRoute({
   method: "post",
   path: "/regenerate",
   summary: "重新生成回答",
-  description: "重新生成指定会话中最后一条 Assistant 的回复。后端会自动清理 SQLite 中的最后一条回复，并裁剪 Claude Session Store 以便进行重新生成。",
+  description:
+    "重新生成指定会话中最后一条 Assistant 的回复。后端会自动清理 SQLite 中的最后一条回复，并裁剪 Claude Session Store 以便进行重新生成。",
   request: {
     body: {
       content: {
         "application/json": {
           schema: z.object({
-            session_id: z.string().openapi({ description: "会话 ID", example: "sess_abc123" }),
+            session_id: z
+              .string()
+              .openapi({ description: "会话 ID", example: "sess_abc123" }),
           }),
         },
       },
@@ -256,6 +259,7 @@ chatRoutes.openapi(chatStreamRoute, async (c) => {
   return streamSSE(c, async (stream) => {
     try {
       for await (const chunk of chatService.chat(input)) {
+        logSseChunk(chunk);
         await stream.writeSSE({
           event: chunk.event,
           data: JSON.stringify(chunk.data),
@@ -287,6 +291,7 @@ chatRoutes.openapi(regenerateRoute, async (c) => {
   return streamSSE(c, async (stream) => {
     try {
       for await (const chunk of chatService.regenerate(session_id)) {
+        logSseChunk(chunk);
         await stream.writeSSE({
           event: chunk.event,
           data: JSON.stringify(chunk.data),
@@ -362,6 +367,21 @@ chatRoutes.openapi(deleteSessionRoute, async (c) => {
   chatService.deleteSession(id);
   return c.json({ status: "deleted" }, 200);
 });
+
+function logSseChunk(chunk: { event: string; data: any }): void {
+  if (!config.agentTrace) {
+    return;
+  }
+
+  console.log("[ChatRoute] SSE write", {
+    event: chunk.event,
+    type: chunk.data?.type,
+    index: chunk.data?.index,
+    block_type: chunk.data?.content_block?.type,
+    delta_type: chunk.data?.delta?.type,
+    status_text: chunk.data?.type === "status" ? chunk.data.text : undefined,
+  });
+}
 
 chatRoutes.openapi(deleteMessageRoute, async (c) => {
   const { id, messageId } = c.req.valid("param");

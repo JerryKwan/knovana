@@ -25,6 +25,8 @@ const envSchema = z.object({
   ANTHROPIC_API_KEY: z.string().optional(),
   ANTHROPIC_AUTH_TOKEN: z.string().optional(),
   ANTHROPIC_BASE_URL: z.string().default("https://api.anthropic.com"),
+  ANTHROPIC_MODEL: z.string().optional(),
+  KNOVANA_AGENT_TRACE: z.string().optional(),
   KNOVANA_CORS_ORIGINS: z
     .string()
     .default("chrome-extension://*,http://localhost:*,http://127.0.0.1:*"),
@@ -62,6 +64,8 @@ export const config = {
   anthropicApiKey:
     parsedEnv.ANTHROPIC_API_KEY || parsedEnv.ANTHROPIC_AUTH_TOKEN,
   anthropicBaseUrl: parsedEnv.ANTHROPIC_BASE_URL,
+  anthropicModel: parsedEnv.ANTHROPIC_MODEL,
+  agentTrace: /^(1|true|yes|on)$/i.test(parsedEnv.KNOVANA_AGENT_TRACE || ""),
   corsOrigins: parsedEnv.KNOVANA_CORS_ORIGINS.split(",").map((origin) =>
     origin.trim(),
   ),
