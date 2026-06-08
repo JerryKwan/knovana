@@ -1,6 +1,7 @@
 <script lang="ts">
   import {
     Check,
+    ExternalLink,
     Eye,
     EyeOff,
     KeyRound,
@@ -21,7 +22,7 @@
     saveSettings,
   } from '../../services/storage';
   import { applyThemePreference } from '../../services/theme';
-  import type { ExtensionSettings, ThemePreference } from '../../types/settings';
+  import type { ExtensionSettings, ExtensionSurface, ThemePreference } from '../../types/settings';
 
   export let variant: 'panel' | 'page' = 'panel';
   export let onSaved: (settings: ExtensionSettings) => void = () => undefined;
@@ -43,6 +44,11 @@
     { value: 'dark', label: '深色' },
   ];
 
+  const openSurfaces: Array<{ value: ExtensionSurface; label: string; icon: typeof Monitor }> = [
+    { value: 'sidepanel', label: '侧边栏', icon: Monitor },
+    { value: 'popout', label: '独立窗口', icon: ExternalLink },
+  ];
+
   onMount(() => {
     void load();
     return () => {
@@ -61,6 +67,10 @@
   function setTheme(theme: ThemePreference) {
     settings = { ...settings, theme };
     applyThemePreference(theme);
+  }
+
+  function setOpenSurface(preferredOpenSurface: ExtensionSurface) {
+    settings = { ...settings, preferredOpenSurface };
   }
 
   async function save() {
@@ -237,17 +247,36 @@
       </div>
 
       <div class="field">
-        <span class="field-label">侧栏行为</span>
+        <span class="field-label">默认打开方式</span>
+        <div class="segmented-control surface-control" role="radiogroup" aria-label="默认打开方式">
+          {#each openSurfaces as item (item.value)}
+            <button
+              type="button"
+              class:active={settings.preferredOpenSurface === item.value}
+              disabled={loading}
+              role="radio"
+              aria-checked={settings.preferredOpenSurface === item.value}
+              onclick={() => setOpenSurface(item.value)}
+            >
+              <svelte:component this={item.icon} size={13} />
+              {item.label}
+            </button>
+          {/each}
+        </div>
+      </div>
+
+      <div class="field">
+        <span class="field-label">打开行为</span>
         <label class="toggle-row">
           <div class="toggle-info">
-            <strong>右键动作后打开侧栏</strong>
-            <small>保存、摘要和生成文档时自动展开</small>
+            <strong>右键动作后自动打开 Knovana</strong>
+            <small>按默认打开方式展示保存、摘要和生成文档结果</small>
           </div>
           <div class="switch">
             <input
               bind:checked={settings.autoOpenSidePanel}
               type="checkbox"
-              aria-label="右键动作后打开侧栏"
+              aria-label="右键动作后自动打开 Knovana"
               disabled={loading}
             />
             <span class="slider"></span>
@@ -563,6 +592,10 @@
     border-radius: 9px;
     background: var(--kn-field-bg);
     padding: 4px;
+  }
+
+  .surface-control {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .segmented-control button {

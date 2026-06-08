@@ -41,7 +41,8 @@ describe('SettingsPanel', () => {
     await fireEvent.input(backendInput, { target: { value: 'http://127.0.0.1:8787/' } });
     await fireEvent.input(tokenInput, { target: { value: 'test-token' } });
     await fireEvent.click(screen.getByRole('radio', { name: '深色' }));
-    await fireEvent.click(screen.getByRole('checkbox', { name: '右键动作后打开侧栏' }));
+    await fireEvent.click(screen.getByRole('radio', { name: '独立窗口' }));
+    await fireEvent.click(screen.getByRole('checkbox', { name: '右键动作后自动打开 Knovana' }));
     await fireEvent.click(screen.getByRole('button', { name: '保存设置' }));
 
     await waitFor(() =>
@@ -50,6 +51,7 @@ describe('SettingsPanel', () => {
         token: 'test-token',
         theme: 'dark',
         autoOpenSidePanel: false,
+        preferredOpenSurface: 'popout',
       }),
     );
     expect(document.documentElement.dataset.theme).toBe('dark');

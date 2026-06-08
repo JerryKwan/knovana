@@ -1,6 +1,12 @@
 import { apiJson, apiStream } from '../services/api';
 import { collectPageSnapshot, contextFromMenu, createPendingAction } from '../services/capture';
-import { consumePendingAction, getSettings, savePendingAction } from '../services/storage';
+import {
+  clearPendingAction,
+  consumePendingAction,
+  getPopoutBounds,
+  getSettings,
+  savePendingAction,
+} from '../services/storage';
 import type {
   CaptureAction,
   CaptureRequestBody,
@@ -15,8 +21,11 @@ import type {
   SearchResponse,
 } from '../types/api';
 import type { RuntimeMessage, RuntimeResponse } from '../types/message';
+import type { ExtensionSurface } from '../types/settings';
 
 const MENU_ROOT_ID = 'knovana';
+const SETTINGS_STORAGE_KEY = 'knovana.settings';
+const POPOUT_PAGE = 'popout.html';
 const CAPTURE_MENU_IDS = new Set<CaptureAction>([
   'summarize',
   'generate-doc',
@@ -27,6 +36,22 @@ const CAPTURE_MENU_IDS = new Set<CaptureAction>([
 ]);
 
 const activeAbortControllers = new Map<string, AbortController>();
+const streamSurfaceTargets = new Map<string, string>();
+
+interface RegisteredSurface {
+  surfaceId: string;
+  surface: ExtensionSurface;
+  windowId?: number;
+  registeredAt: number;
+}
+
+const registeredSurfaces = new Map<string, RegisteredSurface>();
+let activeSurfaceId: string | undefined;
+let popoutWindowId: number | undefined;
+let lastBrowserWindowId: number | undefined;
+let cachedPreferredSurface: ExtensionSurface = 'sidepanel';
+let cachedAutoOpenAfterAction = true;
+let closePopoutAfterSidepanelRegisters = false;
 
 function abortChat(requestId: string): void {
   const controller = activeAbortControllers.get(requestId);
@@ -37,18 +62,31 @@ function abortChat(requestId: string): void {
 }
 
 export default defineBackground(() => {
+  void refreshActionOpenBehavior();
+
   chrome.runtime.onInstalled.addListener(() => {
     void setupExtension();
   });
 
   chrome.runtime.onStartup.addListener(() => {
-    void setupSidePanelBehavior();
+    void refreshActionOpenBehavior();
   });
 
   chrome.action.onClicked.addListener((tab) => {
     if (tab.windowId !== undefined) {
-      void openSidePanel(tab.windowId);
+      rememberBrowserWindow(tab.windowId);
+      void openSurface(cachedPreferredSurface, tab.windowId);
     }
+  });
+
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName === 'local' && SETTINGS_STORAGE_KEY in changes) {
+      void refreshActionOpenBehavior();
+    }
+  });
+
+  chrome.windows.onRemoved.addListener((windowId) => {
+    handleWindowRemoved(windowId);
   });
 
   chrome.contextMenus.onClicked.addListener((info, tab) => {
@@ -59,8 +97,8 @@ export default defineBackground(() => {
     void handleCommand(command);
   });
 
-  chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResponse) => {
-    void handleRuntimeMessage(message)
+  chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendResponse) => {
+    void handleRuntimeMessage(message, sender)
       .then((response) => sendResponse(response))
       .catch((error: unknown) => sendResponse(errorResponse(error)));
     return true;
@@ -68,12 +106,20 @@ export default defineBackground(() => {
 });
 
 async function setupExtension(): Promise<void> {
-  await setupSidePanelBehavior();
+  await refreshActionOpenBehavior();
   await createContextMenus();
 }
 
-async function setupSidePanelBehavior(): Promise<void> {
-  await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => undefined);
+async function refreshActionOpenBehavior(): Promise<void> {
+  const settings = await getSettings();
+  cachedPreferredSurface = settings.preferredOpenSurface;
+  cachedAutoOpenAfterAction = settings.autoOpenSidePanel;
+
+  await chrome.sidePanel
+    .setPanelBehavior({ openPanelOnActionClick: cachedPreferredSurface === 'sidepanel' })
+    .catch((error: unknown) => {
+      console.warn('Failed to update Knovana action click behavior', error);
+    });
 }
 
 async function createContextMenus(): Promise<void> {
@@ -108,9 +154,10 @@ async function handleContextMenu(
   tab?: chrome.tabs.Tab,
 ): Promise<void> {
   if (!tab?.id || tab.windowId === undefined) return;
+  rememberBrowserWindow(tab.windowId);
 
   if (info.menuItemId === 'open-chat') {
-    await openSidePanel(tab.windowId);
+    await openPreferredSurface(tab.windowId);
     return;
   }
 
@@ -121,16 +168,17 @@ async function handleContextMenu(
   const pending = createPendingAction(action, contextFromMenu(action, info, snapshot), true);
 
   await savePendingAction(pending);
-  await maybeOpenSidePanel(tab.windowId);
-  await broadcastPendingAction(pending);
+  const openedSurfaceId = await maybeOpenPreferredSurface(tab.windowId);
+  await broadcastPendingAction(pending, openedSurfaceId ?? getActiveSurface()?.surfaceId);
 }
 
 async function handleCommand(command: string): Promise<void> {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id || tab.windowId === undefined) return;
+  rememberBrowserWindow(tab.windowId);
 
   if (command === 'toggle-sidepanel') {
-    await openSidePanel(tab.windowId);
+    await openPreferredSurface(tab.windowId);
     return;
   }
 
@@ -145,24 +193,52 @@ async function handleCommand(command: string): Promise<void> {
       true,
     );
     await savePendingAction(pending);
-    await maybeOpenSidePanel(tab.windowId);
-    await broadcastPendingAction(pending);
+    const openedSurfaceId = await maybeOpenPreferredSurface(tab.windowId);
+    await broadcastPendingAction(pending, openedSurfaceId ?? getActiveSurface()?.surfaceId);
   }
 }
 
-async function handleRuntimeMessage(message: RuntimeMessage): Promise<RuntimeResponse> {
+async function handleRuntimeMessage(
+  message: RuntimeMessage,
+  sender: chrome.runtime.MessageSender,
+): Promise<RuntimeResponse> {
   switch (message.type) {
     case 'GET_ACTIVE_CONTEXT':
       return okResponse(await getActiveSnapshot());
 
+    case 'GET_TARGET_WINDOW_ID':
+      return okResponse(await getBrowserWindowId(sender.tab?.windowId));
+
+    case 'REGISTER_SURFACE':
+      return okResponse(registerSurface(message.payload, sender));
+
+    case 'UNREGISTER_SURFACE':
+      unregisterSurface(message.payload.surfaceId);
+      return okResponse(null);
+
+    case 'SWITCH_SURFACE':
+      await switchSurface(message.payload.target, sender, message.payload.sourceSurfaceId);
+      return okResponse(null);
+
+    case 'ACK_PENDING_ACTION':
+      if (shouldSurfaceHandle(message.payload.surfaceId)) {
+        await clearPendingAction(message.payload.actionId);
+      }
+      return okResponse(null);
+
     case 'CONSUME_PENDING_ACTION':
-      return okResponse(await consumePendingAction());
+      if (!message.payload?.surfaceId || shouldSurfaceHandle(message.payload.surfaceId)) {
+        return okResponse(await consumePendingAction());
+      }
+      return okResponse(null);
 
     case 'START_CHAT':
+      streamSurfaceTargets.set(message.requestId, resolveMessageSurfaceId(message.surfaceId));
       void streamChat(message.requestId, message.payload);
       return okResponse({ requestId: message.requestId });
 
     case 'REGENERATE_CHAT':
+      streamSurfaceTargets.set(message.requestId, resolveMessageSurfaceId(message.surfaceId));
       void streamRegenerate(message.requestId, message.payload);
       return okResponse({ requestId: message.requestId });
 
@@ -171,6 +247,7 @@ async function handleRuntimeMessage(message: RuntimeMessage): Promise<RuntimeRes
       return okResponse(null);
 
     case 'START_CAPTURE':
+      streamSurfaceTargets.set(message.requestId, resolveMessageSurfaceId(message.surfaceId));
       void streamCapture(message.requestId, message.payload);
       return okResponse({ requestId: message.requestId });
 
@@ -295,6 +372,7 @@ async function streamChat(requestId: string, payload: ChatRequestBody): Promise<
     }
   } finally {
     activeAbortControllers.delete(requestId);
+    streamSurfaceTargets.delete(requestId);
   }
 }
 
@@ -360,6 +438,7 @@ async function streamRegenerate(requestId: string, payload: { session_id: string
     }
   } finally {
     activeAbortControllers.delete(requestId);
+    streamSurfaceTargets.delete(requestId);
   }
 }
 
@@ -400,6 +479,8 @@ async function streamCapture(requestId: string, payload: CaptureRequestBody): Pr
       status: 'error',
       error: getErrorMessage(error),
     });
+  } finally {
+    streamSurfaceTargets.delete(requestId);
   }
 }
 
@@ -440,30 +521,290 @@ function isScriptableUrl(url?: string): boolean {
   return url.startsWith('http://') || url.startsWith('https://');
 }
 
-async function openSidePanel(windowId: number): Promise<void> {
-  await chrome.sidePanel.open({ windowId }).catch(() => undefined);
+function registerSurface(
+  payload: { surface: ExtensionSurface; surfaceId: string },
+  sender: chrome.runtime.MessageSender,
+): { activeSurfaceId: string } {
+  const windowId = sender.tab?.windowId;
+  registeredSurfaces.set(payload.surfaceId, {
+    ...payload,
+    windowId,
+    registeredAt: Date.now(),
+  });
+  setActiveSurface(payload.surfaceId);
+
+  if (payload.surface === 'popout' && windowId !== undefined) {
+    popoutWindowId = windowId;
+  }
+
+  if (payload.surface === 'sidepanel' && closePopoutAfterSidepanelRegisters) {
+    closePopoutAfterSidepanelRegisters = false;
+    if (streamSurfaceTargets.size === 0) {
+      void closePopoutWindow();
+    }
+  }
+
+  return { activeSurfaceId: payload.surfaceId };
 }
 
-async function maybeOpenSidePanel(windowId: number): Promise<void> {
-  const settings = await getSettings();
-  if (settings.autoOpenSidePanel) {
-    await openSidePanel(windowId);
+function setActiveSurface(surfaceId: string): void {
+  const previousSurfaceId = activeSurfaceId;
+  activeSurfaceId = surfaceId;
+
+  if (!previousSurfaceId || previousSurfaceId === surfaceId) {
+    return;
+  }
+
+  for (const [requestId, targetSurfaceId] of streamSurfaceTargets.entries()) {
+    if (targetSurfaceId === previousSurfaceId) {
+      streamSurfaceTargets.set(requestId, surfaceId);
+    }
   }
 }
 
-async function broadcastPendingAction(pending: PendingAction): Promise<void> {
+function unregisterSurface(surfaceId: string): void {
+  const surface = registeredSurfaces.get(surfaceId);
+  registeredSurfaces.delete(surfaceId);
+
+  if (surface?.surface === 'popout' && surface.windowId === popoutWindowId) {
+    popoutWindowId = undefined;
+  }
+
+  if (activeSurfaceId === surfaceId) {
+    activeSurfaceId = getNewestSurface()?.surfaceId;
+  }
+}
+
+function getActiveSurface(): RegisteredSurface | undefined {
+  return activeSurfaceId ? registeredSurfaces.get(activeSurfaceId) : undefined;
+}
+
+function getNewestSurface(surface?: ExtensionSurface): RegisteredSurface | undefined {
+  return Array.from(registeredSurfaces.values())
+    .filter((item) => !surface || item.surface === surface)
+    .sort((a, b) => b.registeredAt - a.registeredAt)[0];
+}
+
+function shouldSurfaceHandle(surfaceId: string): boolean {
+  return !activeSurfaceId || activeSurfaceId === surfaceId;
+}
+
+function resolveMessageSurfaceId(surfaceId?: string): string {
+  if (surfaceId) {
+    setActiveSurface(surfaceId);
+    return surfaceId;
+  }
+  return getActiveSurface()?.surfaceId ?? '';
+}
+
+function rememberBrowserWindow(windowId: number): void {
+  lastBrowserWindowId = windowId;
+}
+
+function handleWindowRemoved(windowId: number): void {
+  if (windowId !== popoutWindowId) return;
+
+  const activeWasPopout = getActiveSurface()?.surface === 'popout';
+  popoutWindowId = undefined;
+  for (const surface of registeredSurfaces.values()) {
+    if (surface.surface === 'popout') {
+      registeredSurfaces.delete(surface.surfaceId);
+    }
+  }
+  if (activeWasPopout) {
+    activeSurfaceId = getNewestSurface()?.surfaceId;
+  }
+}
+
+async function openPreferredSurface(windowId?: number): Promise<string | undefined> {
+  return openSurface(cachedPreferredSurface, windowId);
+}
+
+async function maybeOpenPreferredSurface(windowId?: number): Promise<string | undefined> {
+  if (!cachedAutoOpenAfterAction) {
+    return getActiveSurface()?.surfaceId;
+  }
+  return openSurface(cachedPreferredSurface, windowId);
+}
+
+async function switchSurface(
+  target: ExtensionSurface,
+  sender: chrome.runtime.MessageSender,
+  sourceSurfaceId: string,
+): Promise<void> {
+  const source = registeredSurfaces.get(sourceSurfaceId);
+  const windowId = await getBrowserWindowId(source?.windowId ?? sender.tab?.windowId);
+
+  await openSurface(target, windowId);
+
+  if (target === 'sidepanel') {
+    closePopoutAfterSidepanelRegisters = streamSurfaceTargets.size === 0;
+    if (closePopoutAfterSidepanelRegisters && getNewestSurface('sidepanel')) {
+      closePopoutAfterSidepanelRegisters = false;
+      await closePopoutWindow();
+    }
+  } else if (windowId !== undefined && streamSurfaceTargets.size === 0) {
+    await closeSidePanel(windowId);
+  }
+}
+
+async function openSurface(
+  surface: ExtensionSurface,
+  windowId?: number,
+): Promise<string | undefined> {
+  if (surface === 'popout') {
+    return openPopout(windowId);
+  }
+  return openSidePanel(windowId);
+}
+
+async function openSidePanel(windowId?: number): Promise<string | undefined> {
+  if (windowId !== undefined && windowId !== popoutWindowId) {
+    rememberBrowserWindow(windowId);
+    await chrome.sidePanel.open({ windowId }).catch((error: unknown) => {
+      console.warn('Failed to open Knovana side panel', error);
+    });
+
+    const surface = getNewestSurface('sidepanel');
+    if (surface) {
+      setActiveSurface(surface.surfaceId);
+    }
+    return surface?.surfaceId;
+  }
+
+  const targetWindowId = await getBrowserWindowId(windowId);
+  if (targetWindowId === undefined) {
+    return undefined;
+  }
+
+  rememberBrowserWindow(targetWindowId);
+  await chrome.sidePanel.open({ windowId: targetWindowId }).catch((error: unknown) => {
+    console.warn('Failed to open Knovana side panel', error);
+  });
+
+  const surface = getNewestSurface('sidepanel');
+  if (surface) {
+    setActiveSurface(surface.surfaceId);
+  }
+  return surface?.surfaceId;
+}
+
+async function openPopout(windowId?: number): Promise<string | undefined> {
+  const currentPopout = popoutWindowId;
+  if (currentPopout !== undefined) {
+    try {
+      await chrome.windows.update(currentPopout, { focused: true });
+      const surface = getNewestSurface('popout');
+      if (surface) {
+        setActiveSurface(surface.surfaceId);
+      }
+      return surface?.surfaceId;
+    } catch {
+      popoutWindowId = undefined;
+    }
+  }
+
+  const targetBrowserWindowId = await getBrowserWindowId(windowId);
+  const bounds = await getPopoutCreateBounds(targetBrowserWindowId);
+  const popoutUrl = buildPopoutUrl(targetBrowserWindowId);
+  const win = await chrome.windows.create({
+    type: 'popup',
+    url: popoutUrl,
+    focused: true,
+    ...bounds,
+  });
+  popoutWindowId = win?.id;
+
+  return undefined;
+}
+
+function buildPopoutUrl(targetBrowserWindowId?: number): string {
+  const url = chrome.runtime.getURL(POPOUT_PAGE);
+  if (targetBrowserWindowId === undefined) {
+    return url;
+  }
+  return `${url}?windowId=${encodeURIComponent(String(targetBrowserWindowId))}`;
+}
+
+async function getPopoutCreateBounds(windowId?: number): Promise<chrome.windows.CreateData> {
+  const bounds = await getPopoutBounds();
+  const browserWindow = await getBrowserWindow(windowId);
+  const fallbackLeft =
+    browserWindow?.left !== undefined && browserWindow.width !== undefined
+      ? browserWindow.left + Math.max(24, browserWindow.width - bounds.width - 32)
+      : undefined;
+  const fallbackTop = browserWindow?.top !== undefined ? browserWindow.top + 72 : undefined;
+
+  return {
+    width: bounds.width,
+    height: bounds.height,
+    left: bounds.left ?? fallbackLeft,
+    top: bounds.top ?? fallbackTop,
+  };
+}
+
+async function getBrowserWindow(windowId?: number): Promise<chrome.windows.Window | undefined> {
+  const targetWindowId = await getBrowserWindowId(windowId);
+  if (targetWindowId === undefined) return undefined;
+
+  return chrome.windows.get(targetWindowId).catch(() => undefined);
+}
+
+async function getBrowserWindowId(preferredWindowId?: number): Promise<number | undefined> {
+  if (preferredWindowId !== undefined && preferredWindowId !== popoutWindowId) {
+    rememberBrowserWindow(preferredWindowId);
+    return preferredWindowId;
+  }
+  if (lastBrowserWindowId !== undefined) {
+    return lastBrowserWindowId;
+  }
+
+  const windows = await chrome.windows.getAll({ windowTypes: ['normal'] }).catch(() => []);
+  const windowId = windows[0]?.id;
+  if (windowId !== undefined) {
+    rememberBrowserWindow(windowId);
+  }
+  return windowId;
+}
+
+async function closePopoutWindow(): Promise<void> {
+  const windowId = popoutWindowId;
+  if (windowId === undefined) return;
+
+  await chrome.windows.remove(windowId).catch(() => undefined);
+  popoutWindowId = undefined;
+}
+
+async function closeSidePanel(windowId: number): Promise<void> {
+  const sidePanelApi = chrome.sidePanel as unknown as {
+    close?: (options?: { windowId?: number }) => Promise<void>;
+  };
+  if (sidePanelApi.close) {
+    await sidePanelApi.close({ windowId }).catch(() => undefined);
+  }
+}
+
+async function broadcastPendingAction(
+  pending: PendingAction,
+  targetSurfaceId?: string,
+): Promise<void> {
+  if (!targetSurfaceId) return;
+
   await chrome.runtime
     .sendMessage<RuntimeMessage>({
       type: 'PENDING_ACTION',
+      targetSurfaceId,
       payload: pending,
     })
     .catch(() => undefined);
 }
 
 async function sendStreamEvent(payload: ApiStreamEvent): Promise<void> {
+  const targetSurfaceId = streamSurfaceTargets.get(payload.requestId);
   await chrome.runtime
     .sendMessage<RuntimeMessage>({
       type: 'STREAM_EVENT',
+      targetSurfaceId,
       payload,
     })
     .catch(() => undefined);

@@ -4,15 +4,17 @@
 
 ## 0. 阶段边界
 
-当前实现处于 **阶段一：侧边栏优先**。
+当前实现处于 **阶段一：Side Panel + Popout 双形态主界面**。
 
 阶段一已经覆盖：
 
 - WXT + Svelte + TypeScript 的 Chrome MV3 基础工程。
-- Background Service Worker，负责右键菜单、快捷键、Side Panel 打开、当前页面上下文采集和内部消息路由。
-- Side Panel，包含对话、知识库、搜索、捕获预览和侧边栏内设置面板。
+- Background Service Worker，负责右键菜单、快捷键、Side Panel / Popout 打开、当前页面上下文采集和内部消息路由。
+- Side Panel 与 Popout 独立窗口，两种形态复用同一套 `KnovanaApp`，包含对话、知识库、历史、捕获预览和设置面板。
 - Options 页面作为 Chrome 标准备用入口，复用侧边栏设置面板。
 - `marked` + `DOMPurify` 的 Markdown 渲染，保证 AI 输出和知识库内容先解析再清洗。
+
+当前 Popout 指 **独立扩展窗口**，由 `chrome.windows.create({ type: 'popup', url: 'popout.html' })` 打开；不使用 Chrome `action.default_popup`，避免点击扩展图标后出现会自动关闭的小弹窗，也避免 `chrome.action.onClicked` 失效。
 
 阶段二再增加：
 
@@ -54,9 +56,11 @@ chrome-extension/
 ├── src/
 │   ├── entrypoints/
 │   │   ├── background.ts         # Service Worker
-│   │   ├── sidepanel/            # Side Panel
+│   │   ├── sidepanel/            # Side Panel 薄入口
+│   │   ├── popout/               # Popout 独立窗口薄入口
 │   │   └── options/              # 设置页面
 │   ├── components/
+│   │   ├── app/                  # KnovanaApp，共享主界面
 │   │   ├── capture/
 │   │   ├── chat/
 │   │   ├── common/
@@ -148,7 +152,16 @@ chrome-extension/
 
 ## 2. 三层架构与通信
 
-阶段一当前只启用 **Service Worker + Side Panel / Options**。页面上下文由 Service Worker 在需要时通过 `chrome.scripting.executeScript` 采集，Side Panel 通过 `chrome.runtime.sendMessage` 与 Service Worker 通信。日常设置在 Side Panel 内完成，Options 页面仅作为 Chrome 标准备用入口。
+阶段一当前启用 **Service Worker + Side Panel / Popout / Options**。页面上下文由 Service Worker 在需要时通过 `chrome.scripting.executeScript` 采集，Side Panel 和 Popout 都通过 `chrome.runtime.sendMessage` 与 Service Worker 通信。日常设置在主界面内完成，Options 页面仅作为 Chrome 标准备用入口。
+
+Side Panel 和 Popout 使用同一套 Svelte 主界面组件：
+
+- `src/components/app/KnovanaApp.svelte` 承载对话、知识库、历史、捕获预览、设置、流式输出和形态切换。
+- `src/entrypoints/sidepanel/App.svelte` 与 `src/entrypoints/popout/App.svelte` 只是薄包装，分别传入 `surface="sidepanel"` 和 `surface="popout"`。
+- 每个主界面实例启动时向 Service Worker 注册 `surfaceId`。Pending Action 和 Stream Event 会带上 `targetSurfaceId`，非目标形态必须忽略，避免两个窗口同时打开时重复消费或重复写入消息。
+- Popout 窗口尺寸和位置持久化到 `chrome.storage.local`；正在进行的 UI 运行态暂存到 `chrome.storage.session`，用于形态切换时恢复消息、捕获状态和 requestId。
+- 扩展图标点击时，Service Worker 使用内存中缓存的默认打开形态，不在调用 `chrome.sidePanel.open()` 前异步读取设置；这是为了满足 Chrome 对 `sidePanel.open()` 的用户手势要求。
+- 从 Popout 停靠回 Side Panel 时，Popout 页面会在点击事件同步链路中直接调用 `chrome.sidePanel.open({ windowId })`。Service Worker 只在新的 Side Panel surface 注册成功后关闭 Popout，避免侧栏打开失败时窗口先消失。
 
 阶段二加入 Content Script 后，Chrome 扩展的三个执行环境彼此隔离，通过消息通信：
 
@@ -169,14 +182,14 @@ chrome-extension/
 └─────────────┼────────────────────────────────────────────────┘
               │
    ┌──────────▼──────────┐         ┌─────────────────────────┐
-   │   Service Worker     │         │     Side Panel           │
-   │   (Background)       │◄───────►│     (Svelte App)         │
+   │   Service Worker     │         │ Side Panel / Popout      │
+   │   (Background)       │◄───────►│ Shared KnovanaApp        │
    │                      │ message │                          │
    │   • 上下文菜单注册    │         │  ┌───────────────────┐  │
    │   • 菜单点击处理      │         │  │ 💬 Chat │ 📚 KB   │  │
    │   • 消息路由          │         │  ├───────────────────┤  │
    │   • API 请求代理      │         │  │                   │  │
-   │   • 快捷键处理        │         │  │  [内容区域]        │  │
+   │   • 形态切换/聚焦     │         │  │  [内容区域]        │  │
    │                      │         │  │                   │  │
    └──────────────────────┘         │  ├───────────────────┤  │
                                     │  │  [输入栏]          │  │
@@ -203,12 +216,14 @@ type MessageType =
   | 'CAPTURE_SELECTION'      // 捕获选区内容
   | 'CAPTURE_IMAGE'          // 捕获图片
 
-  // Service Worker → Side Panel / Content Script
+  // Service Worker → Side Panel / Popout / Content Script
   | 'CONTEXT_MENU_ACTION'    // 右键菜单动作
   | 'QUICK_ACTION'           // 快速操作指令
 
-  // Side Panel → Service Worker
+  // Side Panel / Popout → Service Worker
   | 'API_REQUEST'            // 代理 API 请求
+  | 'REGISTER_SURFACE'       // 注册当前 UI 形态
+  | 'SWITCH_SURFACE'         // 在 Side Panel 和 Popout 间切换
   | 'OPEN_FLOATING_PANEL'    // 打开浮动面板
   | 'CLOSE_FLOATING_PANEL';  // 关闭浮动面板
 ```
@@ -422,15 +437,22 @@ export default defineContentScript({
 
 ---
 
-## 5. Side Panel（侧边栏，阶段一）
+## 5. 主界面双形态（Side Panel + Popout，阶段一）
 
-Side Panel 是阶段一的主要用户界面。当前包含对话、知识库、搜索和设置视图，并在对话区上方承载右键/快捷键触发的捕获预览。
+Side Panel 和 Popout 是阶段一的两个主要用户界面形态。二者复用同一个 `KnovanaApp`，当前包含对话、知识库、历史和设置视图，并在对话区上方承载右键/快捷键触发的捕获预览。
+
+两种形态的差异只在外层承载方式：
+
+- **Side Panel**：使用 Chrome `side_panel.default_path = "sidepanel.html"`，适合边浏览边长期停靠。
+- **Popout**：使用 `chrome.windows.create({ type: "popup", url: "popout.html" })` 打开独立扩展窗口，适合多任务、拖到副屏或需要更宽空间的场景。
+- 顶栏提供图标化形态切换：Side Panel 可弹出为独立窗口，Popout 可停靠回 Side Panel。
+- 设置面板提供默认打开方式：扩展图标、快捷键和右键动作自动打开时都遵循该偏好。
 
 ### 5.1 布局结构
 
 ```
 ┌─────────────────────────────────┐
-│  K  Knovana                 ⚙   │  ← Header
+│  K  Knovana              ↗  ⚙   │  ← Header
 ├─────────────────────────────────┤
 │ 对话      知识库      搜索       │  ← Tab 导航
 ├─────────────────────────────────┤
@@ -450,6 +472,17 @@ Side Panel 是阶段一的主要用户界面。当前包含对话、知识库、
 ```
 
 点击 Header 设置按钮时，主内容区切换为 `SettingsPanel`，不再调用 Chrome 的 `openOptionsPage()` 打开扩展管理页弹窗。
+
+### 5.1.1 形态切换和单活跃面板
+
+每个 `KnovanaApp` 实例生成独立 `surfaceId` 并在 mount 时注册到 Service Worker。Service Worker 保存当前活跃 surface，并把以下事件带上目标：
+
+- 右键菜单和快捷键产生的 `PENDING_ACTION`
+- 对话和捕获产生的 `STREAM_EVENT`
+
+非目标 surface 收到消息时直接忽略。收到 pending action 的目标 surface 会回发 `ACK_PENDING_ACTION`，Service Worker 据此清理本地 pending 缓存，避免下一次打开时重复执行。
+
+切换形态时会先保存当前运行态，再打开目标形态。若没有流式请求，旧形态可以被关闭；若仍在流式输出中，后台会优先保持旧形态直到新形态注册并接管 requestId，避免中途丢 chunk。
 
 ### 5.2 Chat View
 
@@ -477,10 +510,10 @@ Side Panel 是阶段一的主要用户界面。当前包含对话、知识库、
 
 ### 5.5 Settings View
 
-- `SettingsPanel` 同时服务 Side Panel 内设置视图和 Chrome Options 备用页面
-- 支持后端 URL、Access Token、主题和右键动作后自动打开侧栏
+- `SettingsPanel` 同时服务主界面内设置视图和 Chrome Options 备用页面
+- 支持后端 URL、Access Token、主题、默认打开方式和右键动作后自动打开 Knovana
 - 支持测试后端连接，保存后立即应用主题并刷新侧栏 Token 状态
-- 侧边栏设置是主入口，避免 Chrome options 弹窗与 Side Panel 空间割裂
+- 主界面内设置是主入口，避免 Chrome options 弹窗与日常工作界面割裂
 
 ---
 
@@ -504,7 +537,7 @@ Side Panel 是阶段一的主要用户界面。当前包含对话、知识库、
   "commands": {
     "toggle-sidepanel": {
       "suggested_key": { "default": "Alt+Q" },
-      "description": "打开/关闭 Knovana 侧边栏"
+      "description": "打开 Knovana 默认形态"
     },
     "quick-capture": {
       "suggested_key": { "default": "Ctrl+Shift+S" },
@@ -518,9 +551,14 @@ Side Panel 是阶段一的主要用户界面。当前包含对话、知识库、
 
 ## 7. 状态管理
 
-阶段一先使用组件局部状态承载 Side Panel 当前交互，避免在功能边界还未稳定时过早抽象。阶段二在加入浮动面板、会话历史和跨页面状态后，再使用 Svelte 内置的 `writable` / `derived` Store：
+阶段一先使用组件局部状态承载主界面当前交互，避免在功能边界还未稳定时过早抽象。为支持 Side Panel 与 Popout 灵活切换，当前已经额外使用两类扩展存储：
 
-当前 Side Panel 会把最近活跃的聊天会话 ID 保存到 `chrome.storage.local` 的 `knovana.currentChatSessionId`。用户关闭并重新打开扩展时，Chat 页会读取该会话 ID，并通过后端 `GET /api/v1/chat/sessions/{id}` 恢复当前会话消息；本地不保存完整聊天消息，长期历史仍以后端会话存储为准。用户点击“新对话”或删除当前会话时会清理该本地指针。
+- `chrome.storage.local`：保存长期偏好和恢复信息，例如后端地址、访问凭据、主题、默认打开形态、右键动作自动打开开关、当前会话 ID、输入草稿和 Popout 窗口尺寸/位置。
+- `chrome.storage.session`：保存短期运行态，例如当前消息列表、流式 requestId、捕获输出和活跃 Tab，用于形态切换时恢复 UI 现场；浏览器会话结束后不作为长期数据源。
+
+阶段二在加入页面内浮动面板、会话历史和更复杂跨页面状态后，再评估是否引入 Svelte 内置的 `writable` / `derived` Store：
+
+当前主界面会把最近活跃的聊天会话 ID 保存到 `chrome.storage.local` 的 `knovana.currentChatSessionId`。用户关闭并重新打开扩展时，Chat 页会读取该会话 ID，并通过后端 `GET /api/v1/chat/sessions/{id}` 恢复当前会话消息；长期历史仍以后端会话存储为准。用户点击“新对话”或删除当前会话时会清理该本地指针和临时运行态。
 
 ```typescript
 // stores/chat.ts
@@ -576,7 +614,7 @@ export const currentPageInfo = writable<PageMetadata | null>(null);
 
 ## 8. API 通信
 
-阶段一当前由 Side Panel 通过 Service Worker 代理对话、捕获、知识库和搜索请求；`SettingsPanel` 直接测试后端连接。阶段二引入浮动面板后，应统一 API 客户端、错误格式、超时/取消和认证头处理。
+阶段一当前由 Side Panel / Popout 通过 Service Worker 代理对话、捕获、知识库和搜索请求；`SettingsPanel` 直接测试后端连接。阶段二引入页面内浮动面板后，应统一 API 客户端、错误格式、超时/取消和认证头处理。
 
 目标 API 通信方式：
 

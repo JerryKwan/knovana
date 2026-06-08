@@ -61,6 +61,7 @@ describe('storage service', () => {
       token: 'test-token',
       theme: 'dark',
       autoOpenSidePanel: false,
+      preferredOpenSurface: 'popout',
     });
 
     await expect(getSettings()).resolves.toEqual({
@@ -68,6 +69,7 @@ describe('storage service', () => {
       token: 'test-token',
       theme: 'dark',
       autoOpenSidePanel: false,
+      preferredOpenSurface: 'popout',
     });
   });
 

@@ -2,4 +2,4 @@
   import KnovanaApp from '../../components/app/KnovanaApp.svelte';
 </script>
 
-<KnovanaApp surface="sidepanel" />
+<KnovanaApp surface="popout" />
