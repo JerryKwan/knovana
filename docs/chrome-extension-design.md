@@ -520,6 +520,8 @@ Side Panel 是阶段一的主要用户界面。当前包含对话、知识库、
 
 阶段一先使用组件局部状态承载 Side Panel 当前交互，避免在功能边界还未稳定时过早抽象。阶段二在加入浮动面板、会话历史和跨页面状态后，再使用 Svelte 内置的 `writable` / `derived` Store：
 
+当前 Side Panel 会把最近活跃的聊天会话 ID 保存到 `chrome.storage.local` 的 `knovana.currentChatSessionId`。用户关闭并重新打开扩展时，Chat 页会读取该会话 ID，并通过后端 `GET /api/v1/chat/sessions/{id}` 恢复当前会话消息；本地不保存完整聊天消息，长期历史仍以后端会话存储为准。用户点击“新对话”或删除当前会话时会清理该本地指针。
+
 ```typescript
 // stores/chat.ts
 import { writable, derived } from 'svelte/store';

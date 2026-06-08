@@ -16,7 +16,12 @@
   import SettingsPanel from '../../components/settings/SettingsPanel.svelte';
   import { buildCaptureRequest } from '../../services/capture';
   import { sendRuntimeMessage } from '../../services/messaging';
-  import { getSettings } from '../../services/storage';
+  import {
+    clearCurrentChatSessionId,
+    getCurrentChatSessionId,
+    getSettings,
+    saveCurrentChatSessionId,
+  } from '../../services/storage';
   import { applyThemePreference } from '../../services/theme';
   import type { ApiStreamEvent } from '../../types/api';
   import type { ChatMessage } from '../../types/chat';
@@ -39,6 +44,7 @@
   let chatRequestId = '';
   let activeAssistantId = '';
   let currentSessionId: string | undefined = undefined;
+  let restoringSession = false;
   let hasToken = false;
   let settingsOpen = false;
   let selectedModel = 'flash';
@@ -58,6 +64,7 @@
 
   async function loadInitialState() {
     await Promise.all([loadContext(), loadSettings()]);
+    await restoreCurrentSession();
     const pending = await sendRuntimeMessage<PendingAction | null>({
       type: 'CONSUME_PENDING_ACTION',
     });
@@ -74,6 +81,18 @@
 
   async function loadContext() {
     currentContext = await sendRuntimeMessage<PageSnapshot>({ type: 'GET_ACTIVE_CONTEXT' });
+  }
+
+  async function restoreCurrentSession() {
+    const sessionId = await getCurrentChatSessionId();
+    if (!sessionId) return;
+
+    restoringSession = true;
+    try {
+      await loadSessionDetail(sessionId, { silent: true });
+    } finally {
+      restoringSession = false;
+    }
   }
 
   function handleRuntimeMessage(message: RuntimeMessage) {
@@ -180,8 +199,9 @@
   }
 
   function handleChatStream(event: ApiStreamEvent) {
-    if (event.sessionId) {
+    if (event.sessionId && event.sessionId !== currentSessionId) {
       currentSessionId = event.sessionId;
+      void saveCurrentChatSessionId(event.sessionId);
     }
     if (event.status === 'chunk') {
       if (event.pspEvent) {
@@ -460,13 +480,14 @@
     });
   }
 
-  function startNewSession() {
+  async function startNewSession() {
     if (chatRunning) return;
     messages = [];
     currentSessionId = undefined;
     pendingAction = null;
     activeTab = 'chat';
     clearCapture();
+    await clearCurrentChatSessionId();
   }
 
   interface SessionDetailResponse {
@@ -480,7 +501,7 @@
     }>;
   }
 
-  async function loadSessionDetail(sessionId: string) {
+  async function loadSessionDetail(sessionId: string, options: { silent?: boolean } = {}) {
     try {
       const detail = await sendRuntimeMessage<SessionDetailResponse>({
         type: 'GET_SESSION_DETAIL',
@@ -497,9 +518,15 @@
         }));
         currentSessionId = sessionId;
         activeTab = 'chat';
+        await saveCurrentChatSessionId(sessionId);
       }
     } catch (err) {
-      alert(err instanceof Error ? err.message : String(err));
+      if (currentSessionId === sessionId) {
+        currentSessionId = undefined;
+      }
+      if (!options.silent) {
+        alert(err instanceof Error ? err.message : String(err));
+      }
     }
   }
 
@@ -509,7 +536,7 @@
 
   function handleDeleteSession(event: CustomEvent<{ sessionId: string }>) {
     if (currentSessionId === event.detail.sessionId) {
-      startNewSession();
+      void startNewSession();
     }
   }
 </script>
@@ -598,7 +625,11 @@
 
       <section class="view">
         {#if activeTab === 'chat'}
-          <ChatView {messages} isStreaming={chatRunning} onRegenerate={handleRegenerate} />
+          {#if restoringSession}
+            <div class="restore-state" role="status">正在恢复当前对话...</div>
+          {:else}
+            <ChatView {messages} isStreaming={chatRunning} onRegenerate={handleRegenerate} />
+          {/if}
         {:else if activeTab === 'knowledge'}
           <KnowledgeView />
         {:else}
@@ -612,7 +643,7 @@
 
       {#if activeTab === 'chat'}
         <InputBar
-          disabled={chatRunning}
+          disabled={chatRunning || restoringSession}
           onSubmit={sendChat}
           onStop={stopChat}
           bind:selectedModel
@@ -810,6 +841,16 @@
     overflow: hidden;
     display: flex;
     flex-direction: column;
+  }
+
+  .restore-state {
+    display: grid;
+    min-height: 0;
+    flex: 1;
+    place-items: center;
+    color: var(--kn-text-muted);
+    font-size: 13px;
+    font-weight: 600;
   }
 
   /* ═══════════════════════════════════════════════════════════════

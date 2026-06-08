@@ -3,6 +3,7 @@ import type { ExtensionSettings } from '../types/settings';
 
 const SETTINGS_KEY = 'knovana.settings';
 const PENDING_ACTION_KEY = 'knovana.pendingAction';
+const CURRENT_CHAT_SESSION_KEY = 'knovana.currentChatSessionId';
 
 export const DEFAULT_SETTINGS: ExtensionSettings = {
   backendUrl: 'http://localhost:8000/api/v1',
@@ -48,6 +49,24 @@ export async function consumePendingAction(): Promise<PendingAction | null> {
   const action = await getLocal<PendingAction>(PENDING_ACTION_KEY);
   await removeLocal(PENDING_ACTION_KEY);
   return action ?? null;
+}
+
+export async function getCurrentChatSessionId(): Promise<string | undefined> {
+  const sessionId = await getLocal<unknown>(CURRENT_CHAT_SESSION_KEY);
+  return typeof sessionId === 'string' && sessionId.trim() ? sessionId.trim() : undefined;
+}
+
+export async function saveCurrentChatSessionId(sessionId: string): Promise<void> {
+  const nextSessionId = sessionId.trim();
+  if (!nextSessionId) {
+    await clearCurrentChatSessionId();
+    return;
+  }
+  await setLocal<string>(CURRENT_CHAT_SESSION_KEY, nextSessionId);
+}
+
+export async function clearCurrentChatSessionId(): Promise<void> {
+  await removeLocal(CURRENT_CHAT_SESSION_KEY);
 }
 
 export function normalizeBackendUrl(url: string): string {

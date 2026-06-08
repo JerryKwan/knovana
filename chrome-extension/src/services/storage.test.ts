@@ -2,9 +2,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PendingAction } from '../types/capture';
 import {
   DEFAULT_SETTINGS,
+  clearCurrentChatSessionId,
   consumePendingAction,
+  getCurrentChatSessionId,
   getSettings,
   normalizeBackendUrl,
+  saveCurrentChatSessionId,
   savePendingAction,
   saveSettings,
 } from './storage';
@@ -84,5 +87,22 @@ describe('storage service', () => {
 
     await expect(consumePendingAction()).resolves.toEqual(pending);
     await expect(consumePendingAction()).resolves.toBeNull();
+  });
+
+  it('persists and clears the current chat session id', async () => {
+    await expect(getCurrentChatSessionId()).resolves.toBeUndefined();
+
+    await saveCurrentChatSessionId(' session-1 ');
+    await expect(getCurrentChatSessionId()).resolves.toBe('session-1');
+
+    await clearCurrentChatSessionId();
+    await expect(getCurrentChatSessionId()).resolves.toBeUndefined();
+  });
+
+  it('clears the current chat session id when saving a blank value', async () => {
+    await saveCurrentChatSessionId('session-1');
+    await saveCurrentChatSessionId('  ');
+
+    await expect(getCurrentChatSessionId()).resolves.toBeUndefined();
   });
 });
