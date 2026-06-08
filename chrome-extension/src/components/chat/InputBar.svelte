@@ -10,17 +10,25 @@
     Save,
     Send,
   } from '@lucide/svelte';
+  import { tick } from 'svelte';
 
   export let disabled = false;
   export let onSubmit: (value: string) => void = () => undefined;
+  export let onValueChange: (value: string) => void = () => undefined;
   export let selectedModel = 'auto';
   export let onQuickAction: (actionId: string) => void = () => undefined;
   export let onStop: () => void = () => undefined;
+  export let value = '';
 
-  let value = '';
   let textarea: HTMLTextAreaElement;
   let actionMenuOpen = false;
   let modelMenuOpen = false;
+  let measuredValue = value;
+
+  $: if (value !== measuredValue) {
+    measuredValue = value;
+    void resizeAfterValueChange();
+  }
 
   const actionIcons: Record<string, typeof Plus> = {
     summarize: Lightbulb,
@@ -64,10 +72,15 @@
     modelMenuOpen = false;
   }
 
+  function updateValue(nextValue: string) {
+    value = nextValue;
+    onValueChange(value);
+  }
+
   function submit() {
     const next = value.trim();
     if (!next || disabled) return;
-    value = '';
+    updateValue('');
     onSubmit(next);
     if (textarea) textarea.style.height = 'auto';
   }
@@ -79,11 +92,21 @@
     }
   }
 
+  function handleInput(event: Event) {
+    updateValue((event.currentTarget as HTMLTextAreaElement).value);
+    autoResize();
+  }
+
   function autoResize() {
     if (textarea) {
       textarea.style.height = 'auto';
       textarea.style.height = textarea.scrollHeight + 'px';
     }
+  }
+
+  async function resizeAfterValueChange() {
+    await tick();
+    autoResize();
   }
 </script>
 
@@ -91,13 +114,13 @@
   <div class="composer-card" class:disabled>
     <textarea
       bind:this={textarea}
-      bind:value
+      {value}
       {disabled}
       rows="1"
       class="field"
       placeholder="向 Knovana 提问…"
       onkeydown={handleKeydown}
-      oninput={autoResize}
+      oninput={handleInput}
     ></textarea>
 
     <div class="composer-toolbar">

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App.svelte';
 
 const CURRENT_CHAT_SESSION_KEY = 'knovana.currentChatSessionId';
+const CHAT_INPUT_DRAFT_KEY = 'knovana.chatInputDraft';
 const localStore: Record<string, unknown> = {};
 const sendMessageMock = vi.fn();
 
@@ -105,8 +106,37 @@ describe('Sidepanel App current chat session restore', () => {
     expect(localStore[CURRENT_CHAT_SESSION_KEY]).toBe('session-1');
   });
 
+  it('restores the saved chat input draft when the sidepanel opens', async () => {
+    localStore[CHAT_INPUT_DRAFT_KEY] = '未发送的问题';
+
+    render(App);
+
+    expect(await screen.findByDisplayValue('未发送的问题')).toBeTruthy();
+  });
+
+  it('restores the saved current session and chat input draft together', async () => {
+    localStore[CURRENT_CHAT_SESSION_KEY] = 'session-1';
+    localStore[CHAT_INPUT_DRAFT_KEY] = '未发送的问题';
+
+    render(App);
+
+    expect(await screen.findByText('关闭前的问题')).toBeTruthy();
+    expect(screen.getByText('关闭前的回答')).toBeTruthy();
+    expect(screen.getByDisplayValue('未发送的问题')).toBeTruthy();
+  });
+
+  it('persists chat input draft changes', async () => {
+    render(App);
+
+    const input = (await screen.findByPlaceholderText('向 Knovana 提问…')) as HTMLTextAreaElement;
+    await fireEvent.input(input, { target: { value: '新的草稿' } });
+
+    await waitFor(() => expect(localStore[CHAT_INPUT_DRAFT_KEY]).toBe('新的草稿'));
+  });
+
   it('clears the saved session id when starting a new chat', async () => {
     localStore[CURRENT_CHAT_SESSION_KEY] = 'session-1';
+    localStore[CHAT_INPUT_DRAFT_KEY] = '未发送的问题';
 
     render(App);
 
@@ -114,6 +144,8 @@ describe('Sidepanel App current chat session restore', () => {
     await fireEvent.click(screen.getByTitle('新对话'));
 
     await waitFor(() => expect(localStore[CURRENT_CHAT_SESSION_KEY]).toBeUndefined());
+    expect(localStore[CHAT_INPUT_DRAFT_KEY]).toBeUndefined();
+    expect((screen.getByPlaceholderText('向 Knovana 提问…') as HTMLTextAreaElement).value).toBe('');
     expect(screen.getByText('让每一次阅读在此沉淀')).toBeTruthy();
   });
 });

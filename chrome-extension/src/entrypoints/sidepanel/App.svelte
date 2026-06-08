@@ -17,9 +17,12 @@
   import { buildCaptureRequest } from '../../services/capture';
   import { sendRuntimeMessage } from '../../services/messaging';
   import {
+    clearChatInputDraft,
     clearCurrentChatSessionId,
+    getChatInputDraft,
     getCurrentChatSessionId,
     getSettings,
+    saveChatInputDraft,
     saveCurrentChatSessionId,
   } from '../../services/storage';
   import { applyThemePreference } from '../../services/theme';
@@ -45,6 +48,8 @@
   let activeAssistantId = '';
   let currentSessionId: string | undefined = undefined;
   let restoringSession = false;
+  let chatInputDraft = '';
+  let chatInputDraftTouched = false;
   let hasToken = false;
   let settingsOpen = false;
   let selectedModel = 'flash';
@@ -63,7 +68,7 @@
   });
 
   async function loadInitialState() {
-    await Promise.all([loadContext(), loadSettings()]);
+    await Promise.all([loadContext(), loadSettings(), restoreChatInputDraft()]);
     await restoreCurrentSession();
     const pending = await sendRuntimeMessage<PendingAction | null>({
       type: 'CONSUME_PENDING_ACTION',
@@ -83,6 +88,13 @@
     currentContext = await sendRuntimeMessage<PageSnapshot>({ type: 'GET_ACTIVE_CONTEXT' });
   }
 
+  async function restoreChatInputDraft() {
+    const draft = await getChatInputDraft();
+    if (!chatInputDraftTouched) {
+      chatInputDraft = draft;
+    }
+  }
+
   async function restoreCurrentSession() {
     const sessionId = await getCurrentChatSessionId();
     if (!sessionId) return;
@@ -93,6 +105,12 @@
     } finally {
       restoringSession = false;
     }
+  }
+
+  function handleChatInputDraftChange(nextDraft: string) {
+    chatInputDraftTouched = true;
+    chatInputDraft = nextDraft;
+    void saveChatInputDraft(nextDraft);
   }
 
   function handleRuntimeMessage(message: RuntimeMessage) {
@@ -486,8 +504,10 @@
     currentSessionId = undefined;
     pendingAction = null;
     activeTab = 'chat';
+    chatInputDraft = '';
+    chatInputDraftTouched = true;
     clearCapture();
-    await clearCurrentChatSessionId();
+    await Promise.all([clearCurrentChatSessionId(), clearChatInputDraft()]);
   }
 
   interface SessionDetailResponse {
@@ -646,6 +666,8 @@
           disabled={chatRunning || restoringSession}
           onSubmit={sendChat}
           onStop={stopChat}
+          value={chatInputDraft}
+          onValueChange={handleChatInputDraftChange}
           bind:selectedModel
           onQuickAction={handleQuickAction}
         />

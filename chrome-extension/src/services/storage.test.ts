@@ -2,11 +2,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PendingAction } from '../types/capture';
 import {
   DEFAULT_SETTINGS,
+  clearChatInputDraft,
   clearCurrentChatSessionId,
   consumePendingAction,
+  getChatInputDraft,
   getCurrentChatSessionId,
   getSettings,
   normalizeBackendUrl,
+  saveChatInputDraft,
   saveCurrentChatSessionId,
   savePendingAction,
   saveSettings,
@@ -104,5 +107,22 @@ describe('storage service', () => {
     await saveCurrentChatSessionId('  ');
 
     await expect(getCurrentChatSessionId()).resolves.toBeUndefined();
+  });
+
+  it('persists and clears the chat input draft', async () => {
+    await expect(getChatInputDraft()).resolves.toBe('');
+
+    await saveChatInputDraft('  未发送的问题\n第二行  ');
+    await expect(getChatInputDraft()).resolves.toBe('  未发送的问题\n第二行  ');
+
+    await clearChatInputDraft();
+    await expect(getChatInputDraft()).resolves.toBe('');
+  });
+
+  it('clears the chat input draft when saving an empty value', async () => {
+    await saveChatInputDraft('未发送的问题');
+    await saveChatInputDraft('');
+
+    await expect(getChatInputDraft()).resolves.toBe('');
   });
 });
