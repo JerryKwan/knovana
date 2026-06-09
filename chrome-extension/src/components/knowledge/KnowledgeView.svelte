@@ -1,5 +1,14 @@
 <script lang="ts">
-  import { BookOpen, ExternalLink, RefreshCw, Trash2, Search } from '@lucide/svelte';
+  import {
+    BookOpen,
+    ExternalLink,
+    RefreshCw,
+    Trash2,
+    Search,
+    ArrowLeft,
+    Copy,
+    Check,
+  } from '@lucide/svelte';
   import { onMount, onDestroy } from 'svelte';
   import { sendRuntimeMessage } from '../../services/messaging';
   import type {
@@ -16,6 +25,22 @@
   let selected: KnowledgeDetail | null = null;
   let listLoading = true;
   let listError = '';
+  let copied = false;
+  let deletingEntryId: string | null = null;
+  let showDetailDeleteConfirm = false;
+
+  async function handleCopy() {
+    if (!selected) return;
+    try {
+      await navigator.clipboard.writeText(selected.content);
+      copied = true;
+      setTimeout(() => {
+        copied = false;
+      }, 2000);
+    } catch (err) {
+      console.error('Failed to copy text:', err);
+    }
+  }
 
   // 2. Search integration states
   let query = '';
@@ -41,6 +66,8 @@
 
   async function openEntry(entry: KnowledgeEntry) {
     selected = null;
+    deletingEntryId = null;
+    showDetailDeleteConfirm = false;
     try {
       selected = await sendRuntimeMessage<KnowledgeDetail>({
         type: 'GET_KNOWLEDGE_DETAIL',
@@ -51,11 +78,40 @@
     }
   }
 
-  async function deleteEntry(entry: KnowledgeEntry) {
-    if (!confirm('确定要删除此条知识吗？')) return;
-    await sendRuntimeMessage({ type: 'DELETE_KNOWLEDGE', payload: { id: entry.id } });
-    if (selected?.id === entry.id) selected = null;
-    await loadEntries();
+  function askDeleteList(id: string, event: Event) {
+    event.stopPropagation();
+    deletingEntryId = id;
+  }
+
+  function cancelListDelete(event: Event) {
+    event.stopPropagation();
+    deletingEntryId = null;
+  }
+
+  async function executeListDelete(id: string, event: Event) {
+    event.stopPropagation();
+    try {
+      await sendRuntimeMessage({ type: 'DELETE_KNOWLEDGE', payload: { id } });
+      if (selected?.id === id) selected = null;
+      deletingEntryId = null;
+      await loadEntries();
+    } catch (err) {
+      listError = err instanceof Error ? err.message : String(err);
+      deletingEntryId = null;
+    }
+  }
+
+  async function executeDetailDelete() {
+    if (!selected) return;
+    try {
+      await sendRuntimeMessage({ type: 'DELETE_KNOWLEDGE', payload: { id: selected.id } });
+      selected = null;
+      showDetailDeleteConfirm = false;
+      await loadEntries();
+    } catch (err) {
+      listError = err instanceof Error ? err.message : String(err);
+      showDetailDeleteConfirm = false;
+    }
   }
 
   async function runSearch(next = query.trim()) {
@@ -98,135 +154,218 @@
 </script>
 
 <section class="flex min-h-0 flex-1 flex-col overflow-hidden">
-  <!-- 1. Search Bar Header -->
-  <div class="search-toolbar">
-    <label class="search-field">
-      <Search size={15} class="shrink-0 text-[color:var(--kn-text-muted)]" />
-      <input bind:value={query} class="search-input" placeholder="输入提问或搜索知识库..." />
-    </label>
-  </div>
-
-  <div class="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)_auto] overflow-hidden">
-    <div class="overflow-y-auto p-3 kn-scrollbar">
-      {#if query.trim()}
-        <!-- 2A. Search Mode View -->
-        {#if searchError}
-          <p class="view-error">{searchError}</p>
-        {:else if searchLoading}
-          <div class="skeleton-list">
-            <div class="shimmer-card search-bar-shimmer"></div>
-            <div class="shimmer-card"></div>
-            <div class="shimmer-card"></div>
-          </div>
-        {:else}
-          {#if searchAnswer}
-            <div class="answer-card">
-              <Markdown content={searchAnswer} />
+  {#if selected}
+    <div class="detail-container">
+      <header class="detail-header-fixed">
+        <button type="button" class="back-btn" onclick={() => (selected = null)} title="返回列表">
+          <ArrowLeft size={14} />
+          <span>返回</span>
+        </button>
+        <div class="detail-actions">
+          {#if showDetailDeleteConfirm}
+            <div class="header-confirm-box">
+              <span class="confirm-text">确认删除此条知识？</span>
+              <button type="button" class="confirm-btn yes" onclick={executeDetailDelete}>
+                是
+              </button>
+              <button
+                type="button"
+                class="confirm-btn no"
+                onclick={() => (showDetailDeleteConfirm = false)}
+              >
+                否
+              </button>
             </div>
+          {:else}
+            {#if selected.source_url}
+              <a
+                class="detail-action-btn"
+                href={selected.source_url}
+                target="_blank"
+                rel="noreferrer"
+                title="打开来源"
+              >
+                <ExternalLink size={14} />
+              </a>
+            {/if}
+            <button
+              type="button"
+              class="detail-action-btn"
+              onclick={handleCopy}
+              title={copied ? '已复制' : '复制 Markdown'}
+            >
+              {#if copied}
+                <Check size={14} class="text-[color:var(--kn-primary)]" />
+              {:else}
+                <Copy size={14} />
+              {/if}
+            </button>
+            <button
+              type="button"
+              class="detail-action-btn danger"
+              title="删除"
+              onclick={() => (showDetailDeleteConfirm = true)}
+            >
+              <Trash2 size={14} />
+            </button>
           {/if}
-
-          {#if searchResults.length > 0}
-            <div class="entry-list">
-              {#each searchResults as result (result.id)}
-                <article class="knowledge-card">
-                  <button type="button" class="entry-button" onclick={() => openEntry(result)}>
-                    <h3>{result.title}</h3>
-                    <p>{result.summary}</p>
-                  </button>
-                  <div class="entry-footer">
-                    <div class="flex min-w-0 flex-wrap gap-1">
-                      {#each (result.tags ?? []).slice(0, 3) as tag (tag)}
-                        <StatusPill>{tag}</StatusPill>
-                      {/each}
-                    </div>
-                  </div>
-                </article>
-              {/each}
-            </div>
-          {:else if !searchAnswer}
-            <div class="empty-state">没有找到匹配内容</div>
-          {/if}
-        {/if}
-      {:else}
-        <!-- 2B. Library Listing View (Standard Mode) -->
-        <header class="list-toolbar">
-          <div class="toolbar-title">
-            <BookOpen size={14} class="text-[color:var(--kn-primary)]" />
-            <span>全部存档</span>
-          </div>
-          <button type="button" class="toolbar-button" title="刷新列表" onclick={loadEntries}>
-            <RefreshCw size={13} class={listLoading ? 'animate-spin' : ''} />
-          </button>
-        </header>
-
-        {#if listError}
-          <p class="view-error">{listError}</p>
-        {/if}
-
-        {#if listLoading}
-          <div class="skeleton-list">
-            <div class="shimmer-card"></div>
-            <div class="shimmer-card"></div>
-            <div class="shimmer-card"></div>
-          </div>
-        {:else if entries.length === 0}
-          <div class="empty-state">暂无知识条目</div>
-        {:else}
-          <div class="entry-list">
-            {#each entries as entry (entry.id)}
-              <article class="knowledge-card">
-                <button type="button" class="entry-button" onclick={() => openEntry(entry)}>
-                  <h3>{entry.title}</h3>
-                  <p>{entry.summary}</p>
-                </button>
-                <div class="entry-footer">
-                  <div class="flex min-w-0 flex-wrap gap-1">
-                    {#each (entry.tags ?? []).slice(0, 3) as tag (tag)}
-                      <StatusPill>{tag}</StatusPill>
-                    {/each}
-                  </div>
-                  <div class="entry-actions">
-                    {#if entry.source_url}
-                      <a
-                        class="entry-action"
-                        href={entry.source_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        title="打开来源"
-                      >
-                        <ExternalLink size={13} />
-                      </a>
-                    {/if}
-                    <button
-                      type="button"
-                      class="entry-action danger"
-                      title="删除"
-                      onclick={() => deleteEntry(entry)}
-                    >
-                      <Trash2 size={13} />
-                    </button>
-                  </div>
-                </div>
-              </article>
+        </div>
+      </header>
+      <div class="detail-body-scroll kn-scrollbar">
+        <h2 class="detail-title-full">{selected.title}</h2>
+        {#if selected.tags && selected.tags.length > 0}
+          <div class="detail-tags-full">
+            {#each selected.tags as tag (tag)}
+              <StatusPill>{tag}</StatusPill>
             {/each}
           </div>
         {/if}
-      {/if}
-    </div>
-
-    <!-- Details Sidebar Drawer (Shows at the bottom of standard / search lists) -->
-    {#if selected}
-      <aside class="detail-preview kn-scrollbar">
-        <div class="detail-header">
-          <h3>{selected.title}</h3>
-          <button type="button" class="close-detail" onclick={() => (selected = null)}>关闭</button>
-        </div>
-        <div class="detail-markdown">
+        <div class="detail-markdown-full">
           <Markdown content={selected.content} />
         </div>
-      </aside>
-    {/if}
-  </div>
+      </div>
+    </div>
+  {:else}
+    <!-- 1. Search Bar Header -->
+    <div class="search-toolbar">
+      <label class="search-field">
+        <Search size={15} class="shrink-0 text-[color:var(--kn-text-muted)]" />
+        <input bind:value={query} class="search-input" placeholder="输入提问或搜索知识库..." />
+      </label>
+    </div>
+
+    <div class="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)] overflow-hidden">
+      <div class="overflow-y-auto p-3 kn-scrollbar">
+        {#if query.trim()}
+          <!-- 2A. Search Mode View -->
+          {#if searchError}
+            <p class="view-error">{searchError}</p>
+          {:else if searchLoading}
+            <div class="skeleton-list">
+              <div class="shimmer-card search-bar-shimmer"></div>
+              <div class="shimmer-card"></div>
+              <div class="shimmer-card"></div>
+            </div>
+          {:else}
+            {#if searchAnswer}
+              <div class="answer-card">
+                <Markdown content={searchAnswer} />
+              </div>
+            {/if}
+
+            {#if searchResults.length > 0}
+              <div class="entry-list">
+                {#each searchResults as result (result.id)}
+                  <article class="knowledge-card">
+                    <button type="button" class="entry-button" onclick={() => openEntry(result)}>
+                      <h3>{result.title}</h3>
+                      <p>{result.summary}</p>
+                    </button>
+                    <div class="entry-footer">
+                      <div class="flex min-w-0 flex-wrap gap-1">
+                        {#each (result.tags ?? []).slice(0, 3) as tag (tag)}
+                          <StatusPill>{tag}</StatusPill>
+                        {/each}
+                      </div>
+                    </div>
+                  </article>
+                {/each}
+              </div>
+            {:else if !searchAnswer}
+              <div class="empty-state">没有找到匹配内容</div>
+            {/if}
+          {/if}
+        {:else}
+          <!-- 2B. Library Listing View (Standard Mode) -->
+          <header class="list-toolbar">
+            <div class="toolbar-title">
+              <BookOpen size={14} class="text-[color:var(--kn-primary)]" />
+              <span>全部存档</span>
+            </div>
+            <button type="button" class="toolbar-button" title="刷新列表" onclick={loadEntries}>
+              <RefreshCw size={13} class={listLoading ? 'animate-spin' : ''} />
+            </button>
+          </header>
+
+          {#if listError}
+            <p class="view-error">{listError}</p>
+          {/if}
+
+          {#if listLoading}
+            <div class="skeleton-list">
+              <div class="shimmer-card"></div>
+              <div class="shimmer-card"></div>
+              <div class="shimmer-card"></div>
+            </div>
+          {:else if entries.length === 0}
+            <div class="empty-state">暂无知识条目</div>
+          {:else}
+            <div class="entry-list">
+              {#each entries as entry (entry.id)}
+                <article class="knowledge-card" class:confirming={deletingEntryId === entry.id}>
+                  {#if deletingEntryId === entry.id}
+                    <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+                    <div class="delete-confirm-box" onclick={(e) => e.stopPropagation()}>
+                      <span class="confirm-text">确定删除此条知识吗？</span>
+                      <div class="confirm-actions">
+                        <button
+                          type="button"
+                          class="confirm-btn yes"
+                          onclick={(e) => executeListDelete(entry.id, e)}
+                        >
+                          确认
+                        </button>
+                        <button
+                          type="button"
+                          class="confirm-btn no"
+                          onclick={(e) => cancelListDelete(e)}
+                        >
+                          取消
+                        </button>
+                      </div>
+                    </div>
+                  {:else}
+                    <button type="button" class="entry-button" onclick={() => openEntry(entry)}>
+                      <h3>{entry.title}</h3>
+                      <p>{entry.summary}</p>
+                    </button>
+                    <div class="entry-footer">
+                      <div class="flex min-w-0 flex-wrap gap-1">
+                        {#each (entry.tags ?? []).slice(0, 3) as tag (tag)}
+                          <StatusPill>{tag}</StatusPill>
+                        {/each}
+                      </div>
+                      <div class="entry-actions">
+                        {#if entry.source_url}
+                          <a
+                            class="entry-action"
+                            href={entry.source_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            title="打开来源"
+                          >
+                            <ExternalLink size={13} />
+                          </a>
+                        {/if}
+                        <button
+                          type="button"
+                          class="entry-action danger"
+                          title="删除"
+                          onclick={(e) => askDeleteList(entry.id, e)}
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    </div>
+                  {/if}
+                </article>
+              {/each}
+            </div>
+          {/if}
+        {/if}
+      </div>
+    </div>
+  {/if}
 </section>
 
 <style>
@@ -458,46 +597,176 @@
     box-shadow: var(--kn-shadow-soft);
   }
 
-  .detail-preview {
-    max-height: 280px;
-    overflow-y: auto;
-    border-top: 1px solid var(--kn-border);
-    background: var(--kn-bg-raised);
+  .detail-container {
     display: flex;
     flex-direction: column;
+    height: 100%;
+    min-height: 0;
+    background: var(--kn-bg);
   }
 
-  .detail-header {
+  .detail-header-fixed {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 12px 14px 6px;
-    border-bottom: 1px solid color-mix(in srgb, var(--kn-border) 40%, transparent);
+    padding: 9px 12px;
+    border-bottom: 1px solid var(--kn-border);
+    background: color-mix(in srgb, var(--kn-bg-raised) 88%, var(--kn-bg));
+    flex-shrink: 0;
   }
 
-  .detail-header h3 {
-    margin: 0;
-    font-size: 13.5px;
-    font-weight: 850;
-    line-height: 1.4;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    max-width: 80%;
-  }
-
-  .close-detail {
+  .back-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
     border: 0;
+    border-radius: 6px;
     background: transparent;
     color: var(--kn-primary);
-    font-size: 12px;
+    font-size: 12.5px;
     font-weight: 700;
+    padding: 5px 8px;
     cursor: pointer;
+    transition:
+      background 150ms ease,
+      color 150ms ease;
   }
 
-  .detail-markdown {
-    padding: 12px 14px;
+  .back-btn:hover {
+    background: var(--kn-primary-soft);
+  }
+
+  .detail-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .detail-action-btn {
+    display: grid;
+    place-items: center;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--kn-text-muted);
+    width: 28px;
+    height: 28px;
+    cursor: pointer;
+    transition:
+      background 150ms ease,
+      color 150ms ease;
+  }
+
+  .detail-action-btn:hover {
+    background: var(--kn-bg-subtle);
+    color: var(--kn-text);
+  }
+
+  .detail-action-btn.danger:hover {
+    background: color-mix(in srgb, var(--kn-danger) 10%, transparent);
+    color: var(--kn-danger);
+  }
+
+  .detail-body-scroll {
+    flex: 1;
     overflow-y: auto;
+    padding: 16px;
+  }
+
+  .detail-title-full {
+    margin: 0 0 10px 0;
+    font-size: 15px;
+    font-weight: 850;
+    line-height: 1.45;
+    color: var(--kn-text);
+  }
+
+  .detail-tags-full {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 14px;
+    padding-bottom: 12px;
+    border-bottom: 1px dashed color-mix(in srgb, var(--kn-border) 60%, transparent);
+  }
+
+  .detail-markdown-full {
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--kn-text);
+  }
+
+  .knowledge-card.confirming {
+    border-color: color-mix(in srgb, var(--kn-danger) 45%, var(--kn-border));
+    background: color-mix(in srgb, var(--kn-danger) 4%, var(--kn-bg-raised));
+    cursor: default;
+  }
+
+  .delete-confirm-box {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .confirm-text {
+    font-size: 11.5px;
+    font-weight: 700;
+    color: var(--kn-danger);
+  }
+
+  .confirm-actions {
+    display: flex;
+    gap: 6px;
+  }
+
+  .confirm-btn {
+    border: 0;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 4px 10px;
+    cursor: pointer;
+    transition:
+      background 150ms ease,
+      color 150ms ease;
+  }
+
+  .confirm-btn.yes {
+    background: var(--kn-danger);
+    color: #fff;
+  }
+
+  .confirm-btn.yes:hover {
+    background: color-mix(in srgb, var(--kn-danger) 85%, #000);
+  }
+
+  .confirm-btn.no {
+    background: var(--kn-border);
+    color: var(--kn-text);
+  }
+
+  .confirm-btn.no:hover {
+    background: color-mix(in srgb, var(--kn-border) 80%, #000);
+  }
+
+  .header-confirm-box {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .header-confirm-box .confirm-text {
+    font-size: 11.5px;
+    font-weight: 700;
+    color: var(--kn-danger);
+    margin-right: 2px;
+  }
+
+  .header-confirm-box .confirm-btn {
+    padding: 3px 8px;
+    font-size: 10.5px;
   }
 
   @keyframes shimmer {
