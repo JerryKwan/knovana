@@ -7,6 +7,7 @@ import { createListKbTool } from "./kb-list";
 import { createDeleteKbTool } from "./kb-delete";
 import { createTagManagerTool } from "./tag-manager";
 import { createAttachmentManagerTool } from "./attachment-manager";
+import { createReadAttachmentTool } from "./read-attachment";
 
 export interface ToolContext {
   userId: string;
@@ -23,5 +24,6 @@ export function createTools(ctx: ToolContext): SdkMcpToolDefinition<any>[] {
     createDeleteKbTool(ctx),
     createTagManagerTool(ctx),
     createAttachmentManagerTool(ctx),
+    createReadAttachmentTool(ctx),
   ] as SdkMcpToolDefinition<any>[];
 }

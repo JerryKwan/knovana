@@ -9,6 +9,14 @@ export const ChatRequestSchema = z.object({
     description: "历史会话 ID，如果不传则后端会自动创建并分配一个新会话",
     example: "sess_1234567890ab",
   }),
+  attachment: z
+    .object({
+      name: z.string().openapi({ description: "附件文件名" }),
+      size: z.number().optional().openapi({ description: "附件大小" }),
+      path: z.string().openapi({ description: "附件在存储中的相对路径" }),
+    })
+    .optional()
+    .openapi({ description: "用户上传的附件信息" }),
 });
 
 export const CreateSessionRequestSchema = z.object({
@@ -48,6 +56,11 @@ export const ChatMessageSchema = z.object({
   id: z.string().openapi({ example: "msg_001abc" }),
   role: z.enum(["user", "assistant"]).openapi({ example: "user" }),
   content: z.string().openapi({ example: "帮我总结这段内容..." }),
+  metadata: z
+    .string()
+    .nullable()
+    .optional()
+    .openapi({ description: "序列化的 JSON 元数据" }),
   created_at: z.string().openapi({ example: "2024-12-01T14:30:00Z" }),
 });
 

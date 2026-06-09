@@ -17,6 +17,11 @@ import type {
 export interface ChatInput {
   message: string;
   session_id?: string;
+  attachment?: {
+    name: string;
+    size?: number;
+    path: string;
+  };
 }
 
 type PspChunk = { event: string; data: any };
@@ -46,6 +51,11 @@ interface StreamAgentResponseInput {
   sessionId?: string;
   dbInitialized: boolean;
   emitSessionCreated: boolean;
+  attachment?: {
+    name: string;
+    size?: number;
+    path: string;
+  };
 }
 
 export class ChatService {
@@ -81,12 +91,17 @@ export class ChatService {
         sessionId,
         input.message,
         "New Web Capture",
+        input.attachment ? { attachment: input.attachment } : undefined,
       );
     }
 
+    const agentPrompt = input.attachment
+      ? `${input.message}\n\n---\n【用户上传的附件文件】:\n- 文件名: ${input.attachment.name}\n- 本地路径: ${input.attachment.path}\n\n提示: 你可以使用 \`read_attachment\` 工具读取该附件内容。若要将此文件归档/绑定到具体的知识笔记中，请使用 \`attachment_manager\` 工具的 \`import\` 动作。`
+      : input.message;
+
     const agent = this.agentFactory(this.userId, this.kbRoot);
     const sdkStream = agent.chat(
-      input.message,
+      agentPrompt,
       SYSTEM_PROMPT,
       shouldResume ? sessionId : undefined,
     );
@@ -97,6 +112,7 @@ export class ChatService {
       sessionId,
       dbInitialized: shouldResume,
       emitSessionCreated: !shouldResume,
+      attachment: input.attachment,
     });
   }
 
@@ -209,6 +225,7 @@ export class ChatService {
     sessionId,
     dbInitialized,
     emitSessionCreated,
+    attachment,
   }: StreamAgentResponseInput): AsyncGenerator<PspChunk> {
     const messageStart = this.createMessageStartChunk();
     this.logPspChunk("initial", messageStart);
@@ -225,7 +242,12 @@ export class ChatService {
 
       if (!dbInitialized && generatedSessionId) {
         sessionId = generatedSessionId;
-        this.ensureSessionForUserMessage(sessionId, userMessage, "New Chat");
+        this.ensureSessionForUserMessage(
+          sessionId,
+          userMessage,
+          "New Chat",
+          attachment ? { attachment } : undefined,
+        );
         dbInitialized = true;
 
         if (emitSessionCreated) {
@@ -572,6 +594,7 @@ export class ChatService {
     sessionId: string,
     message: string,
     fallbackTitle: string,
+    metadata?: Record<string, unknown>,
   ): void {
     const session = this.sessionRepo.get(sessionId);
     if (!session) {
@@ -582,7 +605,7 @@ export class ChatService {
       this.sessionRepo.updateTimestamp(sessionId);
     }
 
-    this.messageRepo.create(sessionId, "user", message);
+    this.messageRepo.create(sessionId, "user", message, metadata);
   }
 
   private toStatusChunk(msg: any): PspChunk | null {

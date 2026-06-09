@@ -250,8 +250,10 @@ async function handleRuntimeMessage(
   sender: chrome.runtime.MessageSender,
 ): Promise<RuntimeResponse> {
   switch (message.type) {
-    case 'GET_ACTIVE_CONTEXT':
-      return okResponse(await getActiveSnapshot());
+    case 'GET_ACTIVE_CONTEXT': {
+      const action = message.payload?.action as CaptureAction | undefined;
+      return okResponse(await getActiveSnapshot(action));
+    }
 
     case 'GET_TARGET_WINDOW_ID':
       return okResponse(await getBrowserWindowId(sender.tab?.windowId));
@@ -507,12 +509,12 @@ async function streamRegenerate(requestId: string, payload: { session_id: string
   }
 }
 
-async function getActiveSnapshot(): Promise<PageSnapshot> {
+async function getActiveSnapshot(action?: CaptureAction): Promise<PageSnapshot> {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id) {
-    return emptySnapshot();
+    return emptySnapshot(tab);
   }
-  return getTabSnapshot(tab);
+  return getTabSnapshot(tab, action);
 }
 
 async function getTabSnapshot(tab: chrome.tabs.Tab, action?: CaptureAction): Promise<PageSnapshot> {
