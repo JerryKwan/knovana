@@ -6,6 +6,7 @@ const CURRENT_CHAT_SESSION_KEY = 'knovana.currentChatSessionId';
 const CHAT_INPUT_DRAFT_KEY = 'knovana.chatInputDraft';
 const localStore: Record<string, unknown> = {};
 const sendMessageMock = vi.fn();
+const fetchMock = vi.fn();
 
 function installChromeMock() {
   vi.stubGlobal('chrome', {
@@ -32,7 +33,7 @@ function installChromeMock() {
 
 function installRuntimeResponses() {
   sendMessageMock.mockImplementation(
-    async (message: { type: string; payload?: { id: string } }) => {
+    async (message: { type: string; payload?: Record<string, unknown> }) => {
       if (message.type === 'GET_ACTIVE_CONTEXT') {
         return {
           ok: true,
@@ -52,7 +53,7 @@ function installRuntimeResponses() {
         return {
           ok: true,
           data: {
-            id: message.payload?.id,
+            id: message.payload?.id as string,
             title: 'Restored chat',
             messages: [
               {
@@ -83,10 +84,19 @@ describe('Sidepanel App current chat session restore', () => {
       delete localStore[key];
     }
     sendMessageMock.mockReset();
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ filename: 'uploaded.md', url: '/attachments/uploaded.md' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
     installChromeMock();
     installRuntimeResponses();
+    vi.stubGlobal('fetch', fetchMock);
+    let uuidCounter = 0;
     vi.stubGlobal('crypto', {
-      randomUUID: vi.fn(() => 'test-id'),
+      randomUUID: vi.fn(() => `test-id-${++uuidCounter}`),
     });
   });
 
@@ -132,6 +142,72 @@ describe('Sidepanel App current chat session restore', () => {
     await fireEvent.input(input, { target: { value: '新的草稿' } });
 
     await waitFor(() => expect(localStore[CHAT_INPUT_DRAFT_KEY]).toBe('新的草稿'));
+  });
+
+  it('opens quick actions as a directly editable knowledge-entry prompt', async () => {
+    render(App);
+
+    await fireEvent.click(await screen.findByTitle('快捷操作'));
+    await fireEvent.click(screen.getByText('生成知识笔记'));
+
+    const prompt = (await screen.findByLabelText('提示词')) as HTMLTextAreaElement;
+    expect(prompt.value).toContain('请基于我上传、粘贴或补充的资料');
+    expect(prompt.value).toContain('save_to_kb');
+    expect(screen.queryByText(/来源:/)).toBeNull();
+    expect(screen.queryByText('附加整理引导词 (可选)')).toBeNull();
+    expect(screen.queryByText('批注与备注 (可选)')).toBeNull();
+    expect(screen.queryByText('提示词预览')).toBeNull();
+
+    await fireEvent.input(prompt, { target: { value: '整理这份资料并保存。' } });
+    await fireEvent.click(screen.getByText('确认发送并整理'));
+
+    await waitFor(() =>
+      expect(sendMessageMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'START_CHAT',
+          payload: expect.objectContaining({
+            message: '整理这份资料并保存。',
+          }),
+        }),
+      ),
+    );
+  });
+
+  it('keeps uploaded attachments when switching from composer to quick prompt', async () => {
+    const { container } = render(App);
+
+    const fileInput = await waitFor(() => {
+      const input = container.querySelector('input[type="file"]');
+      expect(input).not.toBeNull();
+      return input as HTMLInputElement;
+    });
+    const file = new File(['# Notes'], 'notes.md', { type: 'text/markdown' });
+    await fireEvent.change(fileInput, { target: { files: [file] } });
+
+    expect(await screen.findByText('notes.md')).toBeTruthy();
+    await fireEvent.click(screen.getByTitle('快捷操作'));
+    await fireEvent.click(screen.getByText('生成知识笔记'));
+
+    expect(screen.getByText('notes.md')).toBeTruthy();
+    const prompt = (await screen.findByLabelText('提示词')) as HTMLTextAreaElement;
+    await fireEvent.input(prompt, { target: { value: '读取附件并整理为知识条目。' } });
+    await fireEvent.click(screen.getByText('确认发送并整理'));
+
+    await waitFor(() =>
+      expect(sendMessageMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'START_CHAT',
+          payload: expect.objectContaining({
+            message: '读取附件并整理为知识条目。',
+            attachment: {
+              name: 'notes.md',
+              size: 7,
+              path: 'attachments/uploaded.md',
+            },
+          }),
+        }),
+      ),
+    );
   });
 
   it('clears the saved session id when starting a new chat', async () => {

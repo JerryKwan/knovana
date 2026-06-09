@@ -55,3 +55,24 @@ async function toApiError(response: Response): Promise<ApiError> {
   const text = await response.text().catch(() => '');
   return new ApiError(text || `Request failed with ${response.status}`, response.status);
 }
+
+export async function uploadAttachment(file: File): Promise<{ filename: string; url: string }> {
+  const settings = await getSettings();
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const headers = new Headers();
+  if (settings.token) {
+    headers.set('Authorization', `Bearer ${settings.token}`);
+  }
+
+  const res = await fetch(`${settings.backendUrl}/attachments`, {
+    method: 'POST',
+    headers,
+    body: formData,
+  });
+  if (!res.ok) {
+    throw new Error(`Upload failed: ${res.statusText}`);
+  }
+  return (await res.json()) as { filename: string; url: string };
+}

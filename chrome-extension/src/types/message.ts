@@ -7,7 +7,7 @@ export interface SurfaceRegistrationResponse {
 }
 
 export type RuntimeMessage =
-  | { type: 'GET_ACTIVE_CONTEXT' }
+  | { type: 'GET_ACTIVE_CONTEXT'; payload?: { action?: CaptureAction } }
   | { type: 'GET_TARGET_WINDOW_ID' }
   | { type: 'REGISTER_SURFACE'; payload: { surface: ExtensionSurface; surfaceId: string } }
   | { type: 'UNREGISTER_SURFACE'; payload: { surfaceId: string } }

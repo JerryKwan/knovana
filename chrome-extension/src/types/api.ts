@@ -22,6 +22,11 @@ export interface ChatContext {
 export interface ChatRequestBody {
   message: string;
   session_id?: string;
+  attachment?: {
+    name: string;
+    size?: number;
+    path: string;
+  };
 }
 
 export interface RegenerateRequestBody {

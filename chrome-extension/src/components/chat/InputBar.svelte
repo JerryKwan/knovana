@@ -1,19 +1,34 @@
 <script lang="ts">
-  import { Brain, ChevronDown, ClipboardList, FileText, PenLine, Plus, Send } from '@lucide/svelte';
+  import {
+    Brain,
+    ChevronDown,
+    ClipboardList,
+    File,
+    FileText,
+    Paperclip,
+    Plus,
+    Send,
+    X,
+  } from '@lucide/svelte';
   import { tick } from 'svelte';
+  import { uploadAttachment } from '../../services/api';
+  import type { ChatAttachment } from '../../types/chat';
 
   export let disabled = false;
-  export let onSubmit: (value: string) => void = () => undefined;
+  export let onSubmit: (value: string, attachment?: ChatAttachment) => void = () => undefined;
   export let onValueChange: (value: string) => void = () => undefined;
   export let selectedModel = 'auto';
   export let onQuickAction: (actionId: string) => void = () => undefined;
   export let onStop: () => void = () => undefined;
   export let value = '';
+  export let attachedFile: ChatAttachment | null = null;
 
   let textarea: HTMLTextAreaElement;
+  let fileInput: HTMLInputElement;
   let actionMenuOpen = false;
   let modelMenuOpen = false;
   let measuredValue = value;
+  let isUploading = false;
 
   $: if (value !== measuredValue) {
     measuredValue = value;
@@ -21,13 +36,11 @@
   }
 
   const actionIcons: Record<string, typeof Plus> = {
-    actions: PenLine,
     note: FileText,
     'save-selection': ClipboardList,
   };
 
   const quickActions = [
-    { id: 'actions', label: '提炼行动项' },
     { id: 'note', label: '生成知识笔记' },
     { type: 'divider' },
     { id: 'save-selection', label: '原样保存并标注' },
@@ -63,11 +76,42 @@
     onValueChange(value);
   }
 
+  function triggerFileUpload() {
+    if (disabled || isUploading || attachedFile !== null) return;
+    fileInput?.click();
+  }
+
+  async function handleFileChange(event: Event) {
+    const target = event.target as HTMLInputElement;
+    const file = target.files?.[0];
+    if (!file) return;
+
+    isUploading = true;
+    try {
+      const result = await uploadAttachment(file);
+      attachedFile = {
+        name: file.name,
+        size: file.size,
+        path: `attachments/${result.filename}`,
+      };
+    } catch (err) {
+      alert(`上传失败: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      isUploading = false;
+      if (fileInput) fileInput.value = '';
+    }
+  }
+
+  function removeAttachment() {
+    attachedFile = null;
+  }
+
   function submit() {
     const next = value.trim();
-    if (!next || disabled) return;
+    if (!next || disabled || isUploading) return;
     updateValue('');
-    onSubmit(next);
+    onSubmit(next, attachedFile || undefined);
+    attachedFile = null;
     if (textarea) textarea.style.height = 'auto';
   }
 
@@ -98,10 +142,28 @@
 
 <div class="composer-container">
   <div class="composer-card" class:disabled>
+    {#if attachedFile}
+      <div class="attachment-preview-chip">
+        <File size={12} class="file-icon" />
+        <span class="file-name" title={attachedFile.name}>{attachedFile.name}</span>
+        {#if attachedFile.size !== undefined}
+          <span class="file-size">({(attachedFile.size / 1024).toFixed(1)} KB)</span>
+        {/if}
+        <button
+          type="button"
+          class="remove-attachment-btn"
+          onclick={removeAttachment}
+          title="移除附件"
+        >
+          <X size={10} />
+        </button>
+      </div>
+    {/if}
+
     <textarea
       bind:this={textarea}
       {value}
-      {disabled}
+      disabled={disabled || isUploading}
       rows="1"
       class="field"
       placeholder="向 Knovana 提问…"
@@ -117,7 +179,7 @@
             class="toolbar-btn plus-btn"
             class:open={actionMenuOpen}
             onclick={toggleActionMenu}
-            {disabled}
+            disabled={disabled || isUploading}
             title="快捷操作"
           >
             <Plus size={14} />
@@ -142,6 +204,28 @@
             </div>
           {/if}
         </div>
+
+        <button
+          type="button"
+          class="toolbar-btn attachment-btn"
+          class:loading={isUploading}
+          onclick={triggerFileUpload}
+          disabled={disabled || isUploading || attachedFile !== null}
+          title="上传文件"
+        >
+          {#if isUploading}
+            <span class="spinner-icon" aria-label="正在上传"></span>
+          {:else}
+            <Paperclip size={13} />
+          {/if}
+        </button>
+
+        <input
+          type="file"
+          bind:this={fileInput}
+          style="display: none"
+          onchange={handleFileChange}
+        />
       </div>
 
       <div class="toolbar-right">
@@ -183,7 +267,7 @@
           <button
             type="button"
             class="send-btn"
-            disabled={!value.trim()}
+            disabled={!value.trim() || isUploading}
             title="发送"
             onclick={submit}
           >
@@ -221,6 +305,56 @@
     box-shadow:
       0 4px 20px rgba(0, 0, 0, 0.04),
       0 0 0 3px color-mix(in srgb, var(--kn-primary) 10%, transparent);
+  }
+
+  .attachment-preview-chip {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--kn-bg-subtle);
+    border: 1px solid var(--kn-border);
+    border-radius: 8px;
+    padding: 4px 8px;
+    margin-bottom: 2px;
+    max-width: fit-content;
+    font-size: 11px;
+    color: var(--kn-text);
+  }
+
+  .attachment-preview-chip :global(.file-icon) {
+    color: var(--kn-primary);
+  }
+
+  .file-name {
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 500;
+  }
+
+  .file-size {
+    color: var(--kn-text-muted);
+    font-size: 10px;
+  }
+
+  .remove-attachment-btn {
+    display: grid;
+    place-items: center;
+    border: 0;
+    background: transparent;
+    padding: 2px;
+    border-radius: 50%;
+    color: var(--kn-text-muted);
+    cursor: pointer;
+    transition:
+      background 150ms ease,
+      color 150ms ease;
+  }
+
+  .remove-attachment-btn:hover {
+    background: var(--kn-border);
+    color: var(--kn-text);
   }
 
   .field {
@@ -282,6 +416,11 @@
     padding: 0;
   }
 
+  .attachment-btn {
+    width: 28px;
+    padding: 0;
+  }
+
   .toolbar-btn:hover:not(:disabled) {
     background: var(--kn-bg-subtle);
     color: var(--kn-text);
@@ -290,6 +429,21 @@
   .toolbar-btn.open {
     background: var(--kn-primary-soft);
     color: var(--kn-primary);
+  }
+
+  .spinner-icon {
+    width: 12px;
+    height: 12px;
+    border: 2px solid var(--kn-text-muted);
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+  }
+
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
   }
 
   .send-btn {

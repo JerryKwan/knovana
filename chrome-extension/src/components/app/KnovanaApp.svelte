@@ -3,10 +3,13 @@
     BookOpen,
     ChevronLeft,
     ExternalLink,
+    File,
     MessageCircle,
+    Paperclip,
     Settings,
     SquarePen,
     History,
+    X,
   } from '@lucide/svelte';
   import { onMount } from 'svelte';
   import ChatView from '../chat/ChatView.svelte';
@@ -14,8 +17,12 @@
   import KnowledgeView from '../knowledge/KnowledgeView.svelte';
   import HistoryView from '../knowledge/HistoryView.svelte';
   import SettingsPanel from '../settings/SettingsPanel.svelte';
+  import { uploadAttachment } from '../../services/api';
   import { downloadAndUploadAsset } from '../../services/capture';
-  import { generateCapturePrompt } from '../../services/capture-prompt';
+  import {
+    generateCapturePrompt,
+    generateKnowledgeEntryPrompt,
+  } from '../../services/capture-prompt';
   import { sendRuntimeMessage } from '../../services/messaging';
   import {
     clearAppRuntimeState,
@@ -33,8 +40,8 @@
   import { applyThemePreference } from '../../services/theme';
   import type { AppRuntimeState, PopoutBounds } from '../../services/storage';
   import type { ApiStreamEvent } from '../../types/api';
-  import type { ChatMessage } from '../../types/chat';
-  import type { ActionContext, PageSnapshot, PendingAction } from '../../types/capture';
+  import type { ChatAttachment, ChatMessage } from '../../types/chat';
+  import type { PendingAction } from '../../types/capture';
   import type { RuntimeMessage, SurfaceRegistrationResponse } from '../../types/message';
   import type { ExtensionSettings, ExtensionSurface } from '../../types/settings';
 
@@ -46,7 +53,6 @@
   const RUNTIME_STATE_MAX_AGE_MS = 30 * 60 * 1000;
 
   let activeTab: Tab = 'chat';
-  let currentContext: PageSnapshot | null = null;
   let pendingAction: PendingAction | null = null;
   let captureRunning = false;
   let captureError = '';
@@ -62,6 +68,15 @@
   let settingsOpen = false;
   let selectedModel = 'flash';
   let runtimeHydrated = false;
+  let composerAttachment: ChatAttachment | null = null;
+  let quickActionFileInput: HTMLInputElement;
+  let quickActionUploading = false;
+
+  let activeQuickAction: {
+    id: 'note' | 'save-selection';
+    draftPrompt: string;
+  } | null = null;
+  let quickActionProcessing = false;
   let persistQueued = false;
   let runtimePersistSnapshot: unknown[] | null = null;
   let targetBrowserWindowId = getTargetWindowIdFromUrl();
@@ -127,7 +142,7 @@
       payload: { surface, surfaceId },
     }).catch(() => undefined);
 
-    await Promise.all([loadContext(), loadSettings(), restoreChatInputDraft()]);
+    await Promise.all([loadSettings(), restoreChatInputDraft()]);
     const restoredRuntime = await restoreRuntimeState();
     if (!restoredRuntime) {
       await restoreCurrentSession();
@@ -157,10 +172,6 @@
     const settings = await getSettings();
     hasToken = Boolean(settings.token);
     applyThemePreference(settings.theme);
-  }
-
-  async function loadContext() {
-    currentContext = await sendRuntimeMessage<PageSnapshot>({ type: 'GET_ACTIVE_CONTEXT' });
   }
 
   async function restoreChatInputDraft() {
@@ -387,12 +398,13 @@
     }
   }
 
-  async function sendChat(message: string) {
+  async function sendChat(message: string, attachment?: ChatAttachment) {
     const userMessage: ChatMessage = {
       id: crypto.randomUUID(),
       role: 'user',
       content: message,
       createdAt: Date.now(),
+      attachment,
     };
     const assistantMessage: ChatMessage = {
       id: crypto.randomUUID(),
@@ -415,6 +427,7 @@
       payload: {
         message: message,
         session_id: currentSessionId,
+        attachment,
       },
     });
   }
@@ -665,35 +678,70 @@
   }
 
   function handleQuickAction(actionId: string) {
-    if (actionId === 'save-selection') {
-      const pageCtx = currentContext ?? {
-        pageUrl: '',
-        pageTitle: '',
-        selectedImages: [],
-      };
-      const context: ActionContext = {
-        ...pageCtx,
-        action: 'save-selection',
-        selectedImages: pageCtx.selectedImages ?? [],
-      };
-      receivePendingAction({
-        id: crypto.randomUUID(),
-        action: 'save-selection',
-        context,
-        autoRun: true,
-        createdAt: Date.now(),
-      });
-      return;
-    }
-    // Map to sendChat with preset prompts
-    const prompts: Record<string, string> = {
-      actions: '请从当前页面中提炼关键行动项',
-      note: '请将当前页面的关键内容整理为知识笔记',
+    if (actionId !== 'note' && actionId !== 'save-selection') return;
+
+    chatInputDraft = '';
+    chatInputDraftTouched = true;
+    void saveChatInputDraft('');
+
+    activeQuickAction = {
+      id: actionId,
+      draftPrompt: generateKnowledgeEntryPrompt({
+        preserveOriginal: actionId === 'save-selection',
+      }),
     };
-    const prompt = prompts[actionId];
-    if (prompt) {
-      void sendChat(prompt);
+  }
+
+  async function submitQuickAction() {
+    if (!activeQuickAction || quickActionProcessing || quickActionUploading) return;
+    const prompt = activeQuickAction.draftPrompt.trim();
+    if (!prompt) return;
+
+    quickActionProcessing = true;
+
+    const actionSnapshot = activeQuickAction;
+    const attachment = composerAttachment ?? undefined;
+    try {
+      activeQuickAction = null;
+      composerAttachment = null;
+      await sendChat(prompt, attachment);
+    } catch (err) {
+      activeQuickAction = actionSnapshot;
+      composerAttachment = attachment ?? null;
+      alert(`处理失败: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      quickActionProcessing = false;
     }
+  }
+
+  function triggerQuickActionFileUpload() {
+    if (quickActionProcessing || quickActionUploading || composerAttachment !== null) return;
+    quickActionFileInput?.click();
+  }
+
+  async function handleQuickActionFileChange(event: Event) {
+    const target = event.target as HTMLInputElement;
+    const file = target.files?.[0];
+    if (!file) return;
+
+    quickActionUploading = true;
+    try {
+      const result = await uploadAttachment(file);
+      composerAttachment = {
+        name: file.name,
+        size: file.size,
+        path: `attachments/${result.filename}`,
+      };
+    } catch (err) {
+      alert(`上传失败: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      quickActionUploading = false;
+      if (quickActionFileInput) quickActionFileInput.value = '';
+    }
+  }
+
+  function removeComposerAttachment() {
+    composerAttachment = null;
   }
 
   async function handleRegenerate(index: number) {
@@ -753,6 +801,7 @@
       id?: string;
       role: 'user' | 'assistant';
       content: string;
+      metadata?: string | null;
       created_at?: string;
     }>;
   }
@@ -764,14 +813,28 @@
         payload: { id: sessionId },
       });
       if (detail) {
-        messages = (detail.messages ?? []).map((m) => ({
-          id: m.id || crypto.randomUUID(),
-          role: m.role,
-          content: m.content,
-          createdAt: m.created_at ? new Date(m.created_at).getTime() : Date.now(),
-          isStreaming: false,
-          blocks: m.role === 'assistant' ? [{ type: 'text', text: m.content }] : undefined,
-        }));
+        messages = (detail.messages ?? []).map((m) => {
+          let attachment = undefined;
+          if (m.metadata) {
+            try {
+              const metaObj = JSON.parse(m.metadata);
+              if (metaObj && typeof metaObj === 'object' && metaObj.attachment) {
+                attachment = metaObj.attachment;
+              }
+            } catch {
+              // Ignore invalid JSON
+            }
+          }
+          return {
+            id: m.id || crypto.randomUUID(),
+            role: m.role,
+            content: m.content,
+            createdAt: m.created_at ? new Date(m.created_at).getTime() : Date.now(),
+            isStreaming: false,
+            blocks: m.role === 'assistant' ? [{ type: 'text', text: m.content }] : undefined,
+            attachment,
+          };
+        });
         currentSessionId = sessionId;
         activeTab = 'chat';
         await saveCurrentChatSessionId(sessionId);
@@ -886,6 +949,98 @@
           {#if activeTab === 'chat'}
             {#if restoringSession}
               <div class="restore-state" role="status">正在恢复当前对话...</div>
+            {:else if activeQuickAction}
+              <div class="quick-action-panel">
+                <div class="panel-header">
+                  <h3>整理知识条目</h3>
+                </div>
+
+                <div class="panel-body kn-scrollbar">
+                  <div class="prompt-editor-group">
+                    <label class="prompt-editor-label" for="quick-action-prompt">提示词</label>
+                    <textarea
+                      id="quick-action-prompt"
+                      class="quick-prompt-textarea kn-scrollbar"
+                      bind:value={activeQuickAction.draftPrompt}
+                      spellcheck="false"
+                    ></textarea>
+                  </div>
+
+                  <div class="quick-action-attachment-row">
+                    {#if composerAttachment}
+                      <div class="quick-attachment-chip">
+                        <File size={13} class="file-icon" />
+                        <span class="file-name" title={composerAttachment?.name ?? ''}>
+                          {composerAttachment?.name ?? ''}
+                        </span>
+                        {#if composerAttachment?.size !== undefined}
+                          <span class="file-size"
+                            >({((composerAttachment?.size ?? 0) / 1024).toFixed(1)} KB)</span
+                          >
+                        {/if}
+                        <button
+                          type="button"
+                          class="remove-attachment-btn"
+                          onclick={removeComposerAttachment}
+                          disabled={quickActionProcessing || quickActionUploading}
+                          title="移除附件"
+                        >
+                          <X size={11} />
+                        </button>
+                      </div>
+                    {/if}
+
+                    <button
+                      type="button"
+                      class="upload-inline-btn"
+                      onclick={triggerQuickActionFileUpload}
+                      disabled={quickActionProcessing ||
+                        quickActionUploading ||
+                        composerAttachment !== null}
+                      title="上传附件"
+                    >
+                      {#if quickActionUploading}
+                        <span class="spinner-icon" aria-label="正在上传"></span>
+                      {:else}
+                        <Paperclip size={13} />
+                      {/if}
+                      <span>上传附件</span>
+                    </button>
+
+                    <input
+                      type="file"
+                      bind:this={quickActionFileInput}
+                      class="hidden-file-input"
+                      onchange={handleQuickActionFileChange}
+                    />
+                  </div>
+                </div>
+
+                <div class="panel-footer">
+                  <button
+                    type="button"
+                    class="btn btn-cancel"
+                    disabled={quickActionProcessing}
+                    onclick={() => (activeQuickAction = null)}
+                  >
+                    取消
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn-confirm"
+                    disabled={quickActionProcessing ||
+                      quickActionUploading ||
+                      !(activeQuickAction?.draftPrompt ?? '').trim()}
+                    onclick={submitQuickAction}
+                  >
+                    {#if quickActionProcessing}
+                      正在处理...
+                    {:else}
+                      确认发送并整理
+                    {/if}
+                  </button>
+                </div>
+              </div>
             {:else}
               <ChatView {messages} isStreaming={chatRunning} onRegenerate={handleRegenerate} />
             {/if}
@@ -900,14 +1055,15 @@
           {/if}
         </section>
 
-        {#if activeTab === 'chat'}
+        {#if activeTab === 'chat' && !activeQuickAction}
           <InputBar
             disabled={chatRunning || restoringSession}
-            onSubmit={sendChat}
+            onSubmit={(val, att) => sendChat(val, att)}
             onStop={stopChat}
             value={chatInputDraft}
             onValueChange={handleChatInputDraftChange}
             bind:selectedModel
+            bind:attachedFile={composerAttachment}
             onQuickAction={handleQuickAction}
           />
         {/if}
@@ -1180,5 +1336,246 @@
     min-height: 0;
     overflow: hidden;
     padding: 0;
+  }
+
+  /* ═══════════════════════════════════════════════════════════════
+     Quick Action Panel
+     ═══════════════════════════════════════════════════════════════ */
+
+  .quick-action-panel {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+    background: var(--kn-bg);
+  }
+
+  .panel-header {
+    padding: 16px 16px 14px;
+    border-bottom: 1px solid var(--kn-border);
+    display: flex;
+    flex-direction: column;
+    background: var(--kn-bg-raised);
+  }
+
+  .panel-header h3 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--kn-text);
+  }
+
+  .panel-body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 14px 16px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .prompt-editor-group {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .prompt-editor-label {
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--kn-text);
+  }
+
+  .quick-prompt-textarea {
+    flex: 1;
+    width: 100%;
+    min-height: 320px;
+    padding: 12px;
+    border: 1px solid var(--kn-border);
+    border-radius: 8px;
+    background: var(--kn-field-bg);
+    color: var(--kn-text);
+    font-family:
+      ui-monospace,
+      SFMono-Regular,
+      SF Pro Mono,
+      Menlo,
+      Monaco,
+      Consolas,
+      monospace;
+    font-size: 12px;
+    line-height: 1.6;
+    resize: none;
+    outline: none;
+    white-space: pre-wrap;
+    scrollbar-width: thin;
+    transition:
+      border-color 150ms ease,
+      box-shadow 150ms ease;
+  }
+
+  .quick-prompt-textarea:focus {
+    border-color: color-mix(in srgb, var(--kn-primary) 50%, var(--kn-border));
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--kn-primary) 10%, transparent);
+  }
+
+  .quick-action-attachment-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 32px;
+    flex-wrap: wrap;
+  }
+
+  .quick-attachment-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 100%;
+    min-height: 30px;
+    padding: 5px 8px;
+    border: 1px solid var(--kn-border);
+    border-radius: 8px;
+    background: var(--kn-bg-subtle);
+    color: var(--kn-text);
+    font-size: 11px;
+  }
+
+  .quick-attachment-chip :global(.file-icon) {
+    flex: 0 0 auto;
+    color: var(--kn-primary);
+  }
+
+  .quick-attachment-chip .file-name {
+    min-width: 0;
+    max-width: 190px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 500;
+  }
+
+  .quick-attachment-chip .file-size {
+    color: var(--kn-text-muted);
+    font-size: 11px;
+    white-space: nowrap;
+  }
+
+  .upload-inline-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 30px;
+    padding: 0 10px;
+    border: 1px solid var(--kn-border);
+    border-radius: 8px;
+    background: var(--kn-bg-raised);
+    color: var(--kn-text);
+    font-size: 11.5px;
+    font-weight: 600;
+    cursor: pointer;
+    transition:
+      background 150ms ease,
+      color 150ms ease,
+      border-color 150ms ease;
+  }
+
+  .upload-inline-btn:hover:not(:disabled) {
+    background: var(--kn-bg-subtle);
+    border-color: color-mix(in srgb, var(--kn-primary) 35%, var(--kn-border));
+  }
+
+  .upload-inline-btn:disabled,
+  .remove-attachment-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .hidden-file-input {
+    display: none;
+  }
+
+  .remove-attachment-btn {
+    display: grid;
+    place-items: center;
+    flex: 0 0 auto;
+    border: 0;
+    background: transparent;
+    padding: 2px;
+    border-radius: 999px;
+    color: var(--kn-text-muted);
+    cursor: pointer;
+    transition:
+      background 150ms ease,
+      color 150ms ease;
+  }
+
+  .remove-attachment-btn:hover:not(:disabled) {
+    background: var(--kn-border);
+    color: var(--kn-text);
+  }
+
+  .spinner-icon {
+    width: 12px;
+    height: 12px;
+    border: 2px solid var(--kn-text-muted);
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+  }
+
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  .panel-footer {
+    padding: 12px 16px 16px;
+    border-top: 1px solid var(--kn-border);
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    background: var(--kn-bg-raised);
+  }
+
+  .btn {
+    font-size: 12.5px;
+    font-weight: 600;
+    padding: 8px 16px;
+    border-radius: 7px;
+    cursor: pointer;
+    transition: all 150ms ease;
+  }
+
+  .btn-cancel {
+    background: transparent;
+    color: var(--kn-text-muted);
+    border: 1px solid var(--kn-border);
+  }
+
+  .btn-cancel:hover:not(:disabled) {
+    background: var(--kn-bg-subtle);
+    color: var(--kn-text);
+  }
+
+  .btn-confirm {
+    background: var(--kn-primary);
+    color: var(--kn-primary-ink);
+    border: 0;
+  }
+
+  .btn-confirm:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--kn-primary) 85%, #000);
+    transform: translateY(-1px);
+  }
+
+  .btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none !important;
   }
 </style>

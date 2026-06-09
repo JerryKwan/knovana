@@ -1,5 +1,37 @@
 import type { CaptureAction, PageSnapshot } from '../types/capture';
 
+interface KnowledgeEntryPromptOptions {
+  preserveOriginal?: boolean;
+}
+
+export function generateKnowledgeEntryPrompt(options: KnowledgeEntryPromptOptions = {}): string {
+  const contentMode = options.preserveOriginal
+    ? '请尽量保留资料原文，不要改写核心表述；只补充必要的标题、摘要、标签和检索线索。'
+    : '请理解资料中的核心观点，整理为结构清晰、层次分明的 Markdown 知识条目。';
+
+  return `请基于我上传、粘贴或补充的资料，整理一条完整的知识库条目。
+
+【资料处理】
+- 如果本次消息包含上传附件，请先使用 \`read_attachment\` 工具读取附件内容；读取时使用附件本地路径中 \`attachments/\` 后面的文件名作为参数。
+- 如果附件是无法直接读取的二进制文件，请结合文件名、元数据和我在下方补充的说明整理。
+- 如果需要把附件绑定到最终知识条目，请使用 \`attachment_manager\` 工具的 \`import\` 动作。
+
+【我补充的重点或原始内容】
+"""
+在这里填写希望重点整理的内容、背景、约束，或直接粘贴资料。
+"""
+
+【整理方式】
+${contentMode}
+
+【输出与保存要求】
+1. 提炼清晰标题、摘要、关键观点和便于后续检索的标签。
+2. 使用 \`obsidian-markdown\` 技能规范，生成符合 Obsidian Flavored Markdown (OFM) 的条目，包含 YAML frontmatter、必要的 [[Wikilinks]]、Callouts 和高亮。
+3. 保留原资料使用的语言，不要无故翻译。
+4. 使用 \`save_to_kb\` 工具保存到知识库，category 默认使用 'inbox'。
+5. 回复中展示整理后的笔记概要，并告知保存的相对路径。`;
+}
+
 export function generateCapturePrompt(
   action: CaptureAction,
   context: PageSnapshot & { mediaUrl?: string },

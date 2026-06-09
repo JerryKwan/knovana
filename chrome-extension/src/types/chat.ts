@@ -11,6 +11,12 @@ export type ContentBlock =
   | { type: 'tool_result'; tool_call_id: string; status: 'success' | 'error'; content: unknown }
   | { type: 'widget'; widget_type: string; data: unknown };
 
+export interface ChatAttachment {
+  name: string;
+  size?: number;
+  path: string;
+}
+
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
@@ -20,4 +26,5 @@ export interface ChatMessage {
   error?: string;
   blocks?: ContentBlock[];
   statusRail?: { text: string; indicator?: 'thinking' | 'tool' | 'loading' } | null;
+  attachment?: ChatAttachment;
 }

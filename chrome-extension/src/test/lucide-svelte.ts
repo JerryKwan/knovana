@@ -43,3 +43,5 @@ export const Trash2 = Icon;
 export const UserRound = Icon;
 export const Wrench = Icon;
 export const X = Icon;
+export const File = Icon;
+export const Paperclip = Icon;

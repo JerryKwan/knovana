@@ -6,6 +6,7 @@
     CircleX,
     Copy,
     Download,
+    File,
     RefreshCw,
     Wrench,
   } from '@lucide/svelte';
@@ -407,6 +408,18 @@
           {:else}
             <div class="bubble">
               <p class="whitespace-pre-wrap text-[13px] leading-6">{message.content}</p>
+              {#if message.attachment}
+                <div class="user-attachment-chip">
+                  <File size={12} class="file-icon" />
+                  <span class="file-name" title={message.attachment.name}
+                    >{message.attachment.name}</span
+                  >
+                  {#if message.attachment.size !== undefined}
+                    <span class="file-size">({(message.attachment.size / 1024).toFixed(1)} KB)</span
+                    >
+                  {/if}
+                </div>
+              {/if}
             </div>
             <div class="message-actions user-actions">
               <button
@@ -954,5 +967,37 @@
       opacity: 1;
       transform: scale(1.1);
     }
+  }
+
+  .user-attachment-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: color-mix(in srgb, var(--kn-bg) 60%, transparent);
+    border: 1px solid color-mix(in srgb, var(--kn-border) 40%, transparent);
+    border-radius: 6px;
+    padding: 4px 8px;
+    margin-top: 6px;
+    font-size: 11px;
+    max-width: 100%;
+    color: var(--kn-text);
+  }
+
+  .user-attachment-chip :global(.file-icon) {
+    color: var(--kn-primary);
+  }
+
+  .user-attachment-chip .file-name {
+    max-width: 160px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 500;
+  }
+
+  .user-attachment-chip .file-size {
+    color: var(--kn-text-muted);
+    font-size: 10px;
+    margin-left: 2px;
   }
 </style>
