@@ -28,7 +28,12 @@ import type { ExtensionSurface } from '../types/settings';
 const MENU_ROOT_ID = 'knovana';
 const SETTINGS_STORAGE_KEY = 'knovana.settings';
 const POPOUT_PAGE = 'popout.html';
-const CAPTURE_MENU_IDS = new Set<CaptureAction>(['generate-doc', 'save-selection', 'save-media']);
+const CAPTURE_MENU_IDS = new Set<CaptureAction>([
+  'generate-doc',
+  'save-selection',
+  'save-media',
+  'extract-page',
+]);
 
 const activeAbortControllers = new Map<string, AbortController>();
 const streamSurfaceTargets = new Map<string, string>();
@@ -127,6 +132,7 @@ async function createContextMenus(): Promise<void> {
   });
 
   const menus: Array<chrome.contextMenus.CreateProperties & { id: CaptureAction | 'open-chat' }> = [
+    { id: 'extract-page', title: '整理整页正文为知识条目', contexts: ['page', 'frame'] },
     { id: 'generate-doc', title: '整理成知识条目', contexts: ['selection'] },
     { id: 'save-selection', title: '原样保存并标注', contexts: ['selection'] },
     { id: 'save-media', title: '保存媒体文件', contexts: ['image', 'video', 'audio'] },
@@ -157,7 +163,7 @@ async function handleContextMenu(
 
   const action = info.menuItemId as CaptureAction;
 
-  const snapshot = await getTabSnapshot(tab);
+  const snapshot = await getTabSnapshot(tab, action);
   const context = contextFromMenu(action, info, snapshot);
 
   let mediaLocalPath = '';
@@ -169,6 +175,7 @@ async function handleContextMenu(
   }
 
   let selectedHtml = context.selectedHtml || '';
+  let selectedText = context.selectedText || '';
   let imagesSection = '';
   if (context.selectedImages && context.selectedImages.length > 0) {
     const uploadPromises = context.selectedImages.map(async (img) => {
@@ -187,6 +194,7 @@ async function handleContextMenu(
     uploadedImages.forEach((img) => {
       if (img.local) {
         selectedHtml = selectedHtml.replaceAll(img.original, img.local);
+        selectedText = selectedText.replaceAll(img.original, img.local);
       }
     });
   }
@@ -194,6 +202,7 @@ async function handleContextMenu(
   const updatedContext = {
     ...context,
     selectedHtml,
+    selectedText,
   };
 
   const initialPrompt = generateCapturePrompt(
@@ -506,7 +515,7 @@ async function getActiveSnapshot(): Promise<PageSnapshot> {
   return getTabSnapshot(tab);
 }
 
-async function getTabSnapshot(tab: chrome.tabs.Tab): Promise<PageSnapshot> {
+async function getTabSnapshot(tab: chrome.tabs.Tab, action?: CaptureAction): Promise<PageSnapshot> {
   if (!tab.id || !isScriptableUrl(tab.url)) {
     return emptySnapshot(tab);
   }
@@ -515,6 +524,7 @@ async function getTabSnapshot(tab: chrome.tabs.Tab): Promise<PageSnapshot> {
     const [result] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       func: collectPageSnapshot,
+      args: [action],
     });
     return result?.result ?? emptySnapshot(tab);
   } catch {
@@ -865,7 +875,7 @@ function injectCaptureOverlay(
   host.style.left = '0';
   host.style.width = '100vw';
   host.style.height = '100vh';
-  host.style.pointerEvents = 'auto';
+  host.style.pointerEvents = 'none';
 
   const shadow = host.attachShadow({ mode: 'open' });
 
@@ -882,14 +892,13 @@ function injectCaptureOverlay(
       left: 0;
       width: 100%;
       height: 100%;
-      background: rgba(18, 17, 16, 0.4);
-      backdrop-filter: blur(8px);
-      -webkit-backdrop-filter: blur(8px);
+      background: transparent;
       display: flex;
       align-items: center;
       justify-content: center;
       opacity: 0;
       transition: opacity 250ms cubic-bezier(0.4, 0, 0.2, 1);
+      pointer-events: none;
     }
     .backdrop.visible {
       opacity: 1;
@@ -909,6 +918,7 @@ function injectCaptureOverlay(
       color: #3D3A35;
       transform: scale(0.95) translateY(10px);
       transition: transform 250ms cubic-bezier(0.34, 1.56, 0.64, 1);
+      pointer-events: auto;
     }
     .backdrop.visible .card {
       transform: scale(1) translateY(0);
@@ -921,6 +931,11 @@ function injectCaptureOverlay(
       align-items: center;
       justify-content: space-between;
       background: #FAF7F2;
+      cursor: grab;
+      user-select: none;
+    }
+    .header:active {
+      cursor: grabbing;
     }
     .brand-section {
       display: flex;
@@ -1149,6 +1164,69 @@ function injectCaptureOverlay(
   shadow.appendChild(style);
   shadow.appendChild(backdrop);
   document.body.appendChild(host);
+
+  let isDragging = false;
+  let startX = 0;
+  let startY = 0;
+  let startLeft = 0;
+  let startTop = 0;
+
+  header.addEventListener('mousedown', (e: MouseEvent) => {
+    if (e.button !== 0) return;
+    if ((e.target as HTMLElement).closest('button') || (e.target as HTMLElement).closest('a'))
+      return;
+
+    isDragging = true;
+    startX = e.clientX;
+    startY = e.clientY;
+
+    const rect = card.getBoundingClientRect();
+    startLeft = rect.left;
+    startTop = rect.top;
+
+    card.style.position = 'fixed';
+    card.style.margin = '0';
+    card.style.left = `${startLeft}px`;
+    card.style.top = `${startTop}px`;
+    card.style.transform = 'none';
+    card.style.transition = 'none';
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+
+    e.preventDefault();
+  });
+
+  function onMouseMove(e: MouseEvent) {
+    if (!isDragging) return;
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+
+    let newLeft = startLeft + dx;
+    let newTop = startTop + dy;
+
+    const cardWidth = card.offsetWidth;
+    const cardHeight = card.offsetHeight;
+    const windowWidth = window.innerWidth;
+    const windowHeight = window.innerHeight;
+
+    if (newLeft < 0) newLeft = 0;
+    if (newLeft + cardWidth > windowWidth) newLeft = windowWidth - cardWidth;
+    if (newTop < 0) newTop = 0;
+    if (newTop + cardHeight > windowHeight) newTop = windowHeight - cardHeight;
+
+    card.style.left = `${newLeft}px`;
+    card.style.top = `${newTop}px`;
+  }
+
+  function onMouseUp() {
+    if (isDragging) {
+      isDragging = false;
+      card.style.transition = '';
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    }
+  }
 
   requestAnimationFrame(() => {
     backdrop.classList.add('visible');

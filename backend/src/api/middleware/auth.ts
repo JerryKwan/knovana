@@ -12,9 +12,13 @@ export const authMiddleware = createMiddleware<AppEnv>(async (c, next) => {
   }
 
   const authorization = c.req.header("Authorization");
-  const token = authorization?.startsWith("Bearer ")
+  let token = authorization?.startsWith("Bearer ")
     ? authorization.slice("Bearer ".length)
     : undefined;
+
+  if (!token) {
+    token = c.req.query("token") || undefined;
+  }
 
   if (!token) {
     throw new AuthError("Missing authorization header with Bearer token");

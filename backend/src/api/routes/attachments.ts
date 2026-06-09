@@ -3,7 +3,7 @@ import { extname, join } from "node:path";
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { AttachmentManager } from "../../storage/knowledge/attachment";
-import { BadRequestError } from "../../utils/errors";
+import { BadRequestError, AuthError } from "../../utils/errors";
 import { config } from "../../config";
 import type { AppEnv } from "../env";
 
@@ -55,7 +55,56 @@ const uploadRoute = createRoute({
   },
 });
 
-// 2. Get serve file route
+// 2. Serve note-local assets
+const serveNoteAssetRoute = createRoute({
+  method: "get",
+  path: "/notes/{noteAssetPath{.+$}}",
+  summary: "拉取笔记本地附件",
+  description: "获取特定笔记本地 assets 目录下的附件二进制流。",
+  request: {
+    params: z.object({
+      noteAssetPath: z.string().openapi({
+        description: "笔记的相对目录路径加上 assets/文件名",
+        example: "topics/ai/my-note-folder/assets/img_20241201_143000.png",
+      }),
+    }),
+  },
+  responses: {
+    200: {
+      description: "返回文件内容二进制流",
+    },
+    404: {
+      description: "附件文件未找到",
+    },
+  },
+});
+
+// 3. Serve user attachment route without exposing userId
+const serveUserAttachmentRoute = createRoute({
+  method: "get",
+  path: "/file/{filename}",
+  summary: "拉取当前登录用户的二进制附件",
+  description:
+    "通过当前登录用户和文件名获取已保存附件的二进制流，并在头部添加匹配的 Content-Type。此接口无需显式传递 userId 从而避免越权安全校验问题。",
+  request: {
+    params: z.object({
+      filename: z.string().openapi({
+        description: "附件文件名",
+        example: "img_20241201_143000.png",
+      }),
+    }),
+  },
+  responses: {
+    200: {
+      description: "返回文件内容二进制流",
+    },
+    404: {
+      description: "附件文件未找到",
+    },
+  },
+});
+
+// 4. Get serve file route
 const serveAttachmentRoute = createRoute({
   method: "get",
   path: "/{userId}/{filename}",
@@ -76,6 +125,9 @@ const serveAttachmentRoute = createRoute({
   responses: {
     200: {
       description: "返回文件内容二进制流",
+    },
+    403: {
+      description: "无权访问他人附件",
     },
     404: {
       description: "附件文件未找到",
@@ -108,8 +160,74 @@ attachmentsRoutes.openapi(uploadRoute, async (c) => {
   );
 });
 
+attachmentsRoutes.openapi(serveNoteAssetRoute, async (c) => {
+  const user = c.get("user");
+  const { noteAssetPath } = c.req.valid("param");
+
+  const assetsIndex = noteAssetPath.lastIndexOf("/assets/");
+  if (assetsIndex === -1) {
+    return c.body("Invalid Path", 400);
+  }
+
+  const notePath = noteAssetPath.substring(0, assetsIndex);
+  const filename = noteAssetPath.substring(assetsIndex + "/assets/".length);
+  const filePath = join(config.kbRoot, user.id, notePath, "assets", filename);
+
+  if (!existsSync(filePath)) {
+    return c.body("File Not Found", 404);
+  }
+
+  const fileBuffer = await readFile(filePath);
+  const ext = extname(filename).toLowerCase();
+
+  let mimeType = "application/octet-stream";
+  if (ext === ".png") mimeType = "image/png";
+  else if (ext === ".jpg" || ext === ".jpeg") mimeType = "image/jpeg";
+  else if (ext === ".gif") mimeType = "image/gif";
+  else if (ext === ".webp") mimeType = "image/webp";
+  else if (ext === ".svg") mimeType = "image/svg+xml";
+  else if (ext === ".pdf") mimeType = "application/pdf";
+
+  return c.body(fileBuffer, 200, {
+    "Content-Type": mimeType,
+  });
+});
+
+attachmentsRoutes.openapi(serveUserAttachmentRoute, async (c) => {
+  const user = c.get("user");
+  const { filename } = c.req.valid("param");
+  const filePath = join(config.kbRoot, user.id, "attachments", filename);
+
+  if (!existsSync(filePath)) {
+    return c.body("File Not Found", 404);
+  }
+
+  const fileBuffer = await readFile(filePath);
+  const ext = extname(filename).toLowerCase();
+
+  let mimeType = "application/octet-stream";
+  if (ext === ".png") mimeType = "image/png";
+  else if (ext === ".jpg" || ext === ".jpeg") mimeType = "image/jpeg";
+  else if (ext === ".gif") mimeType = "image/gif";
+  else if (ext === ".webp") mimeType = "image/webp";
+  else if (ext === ".svg") mimeType = "image/svg+xml";
+  else if (ext === ".pdf") mimeType = "application/pdf";
+
+  return c.body(fileBuffer, 200, {
+    "Content-Type": mimeType,
+  });
+});
+
 attachmentsRoutes.openapi(serveAttachmentRoute, async (c) => {
+  const user = c.get("user");
   const { userId, filename } = c.req.valid("param");
+
+  if (userId !== user.id) {
+    throw new AuthError(
+      "Access denied: Cannot access other users' attachments",
+    );
+  }
+
   const filePath = join(config.kbRoot, userId, "attachments", filename);
 
   if (!existsSync(filePath)) {

@@ -25,7 +25,7 @@ export default defineConfig({
       },
     },
     permissions: ['sidePanel', 'contextMenus', 'activeTab', 'scripting', 'storage', 'tabs'],
-    host_permissions: ['http://localhost:*/*', 'http://127.0.0.1:*/*', 'https://api.knovana.com/*'],
+    host_permissions: ['*://*/*'],
     side_panel: {
       default_path: 'sidepanel.html',
     },

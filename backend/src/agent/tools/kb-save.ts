@@ -1,5 +1,8 @@
 import { tool } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
+import { rename, mkdir } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
 import type { ToolContext } from "./index";
 import { KnowledgeFileOps } from "../../storage/knowledge/file-ops";
 import { IndexManager } from "../../storage/knowledge/index";
@@ -48,6 +51,27 @@ export function createSaveToKbTool(ctx: ToolContext) {
       const fileOps = new KnowledgeFileOps(ctx.kbRoot);
       const indexMgr = new IndexManager(ctx.kbRoot);
 
+      // Automatically detect attachments in content that might not be declared in args.attachments
+      const detectedAttachments = new Set<string>();
+      const attachmentRegex = /attachments\/([a-zA-Z0-9_\-.]+)/g;
+      let match;
+      while ((match = attachmentRegex.exec(args.content)) !== null) {
+        detectedAttachments.add(match[1]);
+      }
+
+      // Add detected attachments to args.attachments if they are not already there
+      const existingAttachmentNames = new Set(
+        args.attachments.map((a) => a.name),
+      );
+      for (const name of detectedAttachments) {
+        if (!existingAttachmentNames.has(name)) {
+          args.attachments.push({
+            name,
+            description: "Auto-detected attachment",
+          });
+        }
+      }
+
       const slug = generateSlug(args.title);
       const nowStr = getISOStringWithOffset();
       const dateStr = nowStr.split("T")[0];
@@ -68,6 +92,28 @@ export function createSaveToKbTool(ctx: ToolContext) {
           : `${folder}/${dateStr}-${slug}.md`;
       }
 
+      let entryContent = args.content;
+
+      if (hasAttachments) {
+        const targetFilePath = fileOps.resolveEntryPath(entryId);
+        const assetsDir = join(dirname(targetFilePath), "assets");
+        await mkdir(assetsDir, { recursive: true });
+
+        const globalAttachmentsDir = join(ctx.kbRoot, "attachments");
+        for (const att of args.attachments) {
+          const sourcePath = join(globalAttachmentsDir, att.name);
+          const destPath = join(assetsDir, att.name);
+          if (existsSync(sourcePath)) {
+            await rename(sourcePath, destPath);
+          }
+          // Rewrite content references: replace "attachments/filename" with "assets/filename"
+          entryContent = entryContent.replaceAll(
+            `attachments/${att.name}`,
+            `assets/${att.name}`,
+          );
+        }
+      }
+
       const entry: KnowledgeEntry = {
         id: entryId,
         title: args.title,
@@ -76,7 +122,7 @@ export function createSaveToKbTool(ctx: ToolContext) {
         tags: args.tags,
         type: args.category === "daily" ? "note" : "excerpt",
         attachments: args.attachments,
-        content: args.content,
+        content: entryContent,
       };
 
       await fileOps.saveEntry(entry);

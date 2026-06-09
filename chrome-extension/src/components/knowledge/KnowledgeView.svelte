@@ -221,7 +221,7 @@
           </div>
         {/if}
         <div class="detail-markdown-full">
-          <Markdown content={selected.content} />
+          <Markdown content={selected.content} noteId={selected.id} />
         </div>
       </div>
     </div>

@@ -1,4 +1,4 @@
-export type CaptureAction = 'generate-doc' | 'save-selection' | 'save-media';
+export type CaptureAction = 'generate-doc' | 'save-selection' | 'save-media' | 'extract-page';
 
 export type ApiCaptureAction = 'generate_doc' | 'save';
 

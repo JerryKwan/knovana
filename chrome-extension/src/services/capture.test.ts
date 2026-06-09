@@ -100,4 +100,57 @@ describe('capture service', () => {
     selection!.removeAllRanges();
     document.body.innerHTML = '';
   });
+
+  it('extracts page content and ignores navigation, footer, sidebar for extract-page action', () => {
+    document.title = 'Page Title';
+    document.body.innerHTML = `
+      <header>Logo and branding</header>
+      <nav>
+        <ul>
+          <li><a href="/">Home</a></li>
+          <li><a href="/about">About</a></li>
+        </ul>
+      </nav>
+      <div class="sidebar">
+        <aside>Sidebar widgets and ads</aside>
+      </div>
+      <main>
+        <article>
+          <h1>Real Heading</h1>
+          <p>This is the main article paragraph 1.</p>
+          <img src="https://example.com/main.png" alt="Main Image">
+          <p>Paragraph 2 of the article.</p>
+          <img src="content/images/gemma.png" alt="Relative Image">
+        </article>
+      </main>
+      <footer>
+        <p>Copyright 2026</p>
+      </footer>
+    `;
+
+    const result = collectPageSnapshot('extract-page');
+    expect(result.pageTitle).toBe('Page Title');
+    expect(result.selectedText).toContain('Real Heading');
+    expect(result.selectedText).toContain('This is the main article paragraph 1.');
+    expect(result.selectedText).toContain('Paragraph 2 of the article.');
+    expect(result.selectedText).not.toContain('Logo and branding');
+    expect(result.selectedText).not.toContain('Home');
+    expect(result.selectedText).not.toContain('Sidebar widgets');
+    expect(result.selectedText).not.toContain('Copyright 2026');
+
+    // Inline image markup test
+    expect(result.selectedText).toContain('![image](https://example.com/main.png)');
+
+    // Relative image resolution test
+    const expectedRelativeAbs = new URL('content/images/gemma.png', document.baseURI).href;
+    expect(result.selectedText).toContain(`![image](${expectedRelativeAbs})`);
+
+    expect(result.selectedImages).toEqual([
+      { src: 'https://example.com/main.png', alt: 'Main Image' },
+      { src: expectedRelativeAbs, alt: 'Relative Image' },
+    ]);
+
+    // Clean up
+    document.body.innerHTML = '';
+  });
 });

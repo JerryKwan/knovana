@@ -10,7 +10,7 @@ import type {
 
 type ChromeMenuInfo = chrome.contextMenus.OnClickData;
 
-export function collectPageSnapshot(): PageSnapshot {
+export function collectPageSnapshot(action?: CaptureAction): PageSnapshot {
   const getMeta = (name: string) =>
     document.querySelector<HTMLMetaElement>(`meta[name="${name}"], meta[property="${name}"]`)
       ?.content;
@@ -23,6 +23,14 @@ export function collectPageSnapshot(): PageSnapshot {
   let selectedText = '';
   let selectedHtml = '';
   let selectedImages: Array<{ src: string; alt?: string }> = [];
+
+  function resolveAbsoluteUrl(url: string): string {
+    try {
+      return new URL(url, document.baseURI).href;
+    } catch {
+      return url;
+    }
+  }
 
   function extractTextWithNewlines(node: Node): string {
     if (node.nodeType === Node.TEXT_NODE) {
@@ -37,6 +45,18 @@ export function collectPageSnapshot(): PageSnapshot {
 
     if (tagName === 'BR') {
       return '\n';
+    }
+
+    if (tagName === 'IMG') {
+      const srcAttr =
+        element.getAttribute('data-src') ||
+        element.getAttribute('data-original-src') ||
+        element.getAttribute('src') ||
+        '';
+      if (srcAttr) {
+        return `\n\n![image](${resolveAbsoluteUrl(srcAttr)})\n\n`;
+      }
+      return '';
     }
 
     let text = '';
@@ -76,7 +96,71 @@ export function collectPageSnapshot(): PageSnapshot {
       .trim();
   }
 
-  if (selection && !selection.isCollapsed && selection.rangeCount > 0) {
+  if (action === 'extract-page') {
+    // Simple page text extraction - remove obvious clutter
+    const docClone = document.cloneNode(true) as Document;
+    const body = docClone.body || docClone.documentElement;
+
+    // 1. Remove tags that are strictly noise
+    const noiseTags = [
+      'script',
+      'style',
+      'noscript',
+      'iframe',
+      'svg',
+      'form',
+      'button',
+      'input',
+      'textarea',
+      'select',
+      'dialog',
+      'nav',
+      'header',
+      'footer',
+      'aside',
+    ];
+    body.querySelectorAll(noiseTags.join(',')).forEach((el) => el.remove());
+
+    // 2. Remove elements matching class/id noise patterns
+    const noisePattern =
+      /nav|menu|footer|header|aside|sidebar|comment|comments|ad|ads|social|share|sharing|related|recommend|recommendation|breadcrumb|breadcrumbs|pagination|banner|popup|widget/i;
+    body.querySelectorAll('*').forEach((el) => {
+      if (noisePattern.test(el.className || '') || noisePattern.test(el.id || '')) {
+        const textLen = el.textContent?.trim().length || 0;
+        if (textLen < 200) {
+          el.remove();
+        }
+      }
+    });
+
+    // 3. Find target content container (article, main, #content, or fall back to body)
+    const targetElement =
+      body.querySelector('article') ||
+      body.querySelector('main') ||
+      body.querySelector('[role="main"]') ||
+      body.querySelector('#content') ||
+      body;
+
+    selectedHtml = targetElement.innerHTML || '';
+    selectedText = cleanNewlines(extractTextWithNewlines(targetElement));
+    selectedImages = Array.from(targetElement.querySelectorAll('img'))
+      .map((img) => {
+        const srcAttr =
+          img.getAttribute('data-src') ||
+          img.getAttribute('data-original-src') ||
+          img.getAttribute('src') ||
+          '';
+        const src = resolveAbsoluteUrl(srcAttr);
+        return { src, alt: img.alt || undefined };
+      })
+      .filter(
+        (img) =>
+          img.src &&
+          (img.src.startsWith('http://') ||
+            img.src.startsWith('https://') ||
+            img.src.startsWith('data:')),
+      );
+  } else if (selection && !selection.isCollapsed && selection.rangeCount > 0) {
     const container = document.createElement('div');
     for (let index = 0; index < selection.rangeCount; index += 1) {
       container.append(selection.getRangeAt(index).cloneContents());
@@ -84,8 +168,22 @@ export function collectPageSnapshot(): PageSnapshot {
     selectedHtml = container.innerHTML;
     selectedText = cleanNewlines(extractTextWithNewlines(container)) || selection.toString().trim();
     selectedImages = Array.from(container.querySelectorAll('img'))
-      .map((image) => ({ src: image.src, alt: image.alt || undefined }))
-      .filter((image) => Boolean(image.src));
+      .map((image) => {
+        const srcAttr =
+          image.getAttribute('data-src') ||
+          image.getAttribute('data-original-src') ||
+          image.getAttribute('src') ||
+          '';
+        const src = resolveAbsoluteUrl(srcAttr);
+        return { src, alt: image.alt || undefined };
+      })
+      .filter(
+        (image) =>
+          image.src &&
+          (image.src.startsWith('http://') ||
+            image.src.startsWith('https://') ||
+            image.src.startsWith('data:')),
+      );
   }
 
   return {
@@ -153,12 +251,13 @@ export function actionLabel(action: CaptureAction): string {
     'generate-doc': '整理成知识条目',
     'save-selection': '原样保存并标注',
     'save-media': '保存媒体文件',
+    'extract-page': '整理整页正文',
   };
   return labels[action];
 }
 
 function toApiAction(action: CaptureAction): ApiCaptureAction {
-  if (action === 'generate-doc') return 'generate_doc';
+  if (action === 'generate-doc' || action === 'extract-page') return 'generate_doc';
   return 'save';
 }
 
