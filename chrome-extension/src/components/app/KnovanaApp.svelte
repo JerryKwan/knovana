@@ -961,6 +961,8 @@
   }
 
   .top-bar__btn {
+    --top-bar-icon-hover-transform: rotate(30deg);
+
     display: grid;
     width: 30px;
     height: 30px;
@@ -976,15 +978,16 @@
   }
 
   .top-bar__btn :global(svg) {
+    transform-origin: center;
     transition: transform 300ms ease;
   }
 
   .top-bar__btn:hover :global(svg) {
-    transform: rotate(30deg);
+    transform: var(--top-bar-icon-hover-transform);
   }
 
-  .top-bar__btn.surface-switch:hover :global(svg) {
-    transform: translate(1px, -1px);
+  .top-bar__btn.surface-switch {
+    --top-bar-icon-hover-transform: translate(1px, -1px) rotate(18deg);
   }
 
   .top-bar__btn:hover,
