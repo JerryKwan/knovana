@@ -1,4 +1,4 @@
-import type { CaptureRequestBody, PendingAction } from './capture';
+import type { CaptureAction, ActionContext, CaptureRequestBody, PendingAction } from './capture';
 import type { ApiStreamEvent, ChatRequestBody, RegenerateRequestBody } from './api';
 import type { ExtensionSurface } from './settings';
 
@@ -35,6 +35,11 @@ export type RuntimeMessage =
   | { type: 'DELETE_SESSION'; payload: { id: string } }
   | { type: 'DELETE_MESSAGE'; payload: { sessionId: string; messageId: string } }
   | { type: 'OPEN_OPTIONS' }
+  | {
+      type: 'CAPTURE_SUBMIT';
+      payload: { prompt: string; action: CaptureAction; context: ActionContext };
+    }
+  | { type: 'CAPTURE_CANCEL' }
   | { type: 'PENDING_ACTION'; targetSurfaceId?: string; payload: PendingAction }
   | { type: 'STREAM_EVENT'; targetSurfaceId?: string; payload: ApiStreamEvent };
 

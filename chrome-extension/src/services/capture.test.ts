@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ActionContext, PageSnapshot } from '../types/capture';
-import { actionLabel, buildCaptureRequest, contextFromMenu } from './capture';
+import { actionLabel, buildCaptureRequest, collectPageSnapshot, contextFromMenu } from './capture';
 
 const snapshot: PageSnapshot = {
   pageUrl: 'https://example.com/article',
@@ -25,36 +25,19 @@ function context(
 }
 
 describe('capture service', () => {
-  it('builds summarize and document requests from selection context', () => {
-    expect(buildCaptureRequest('summarize', context('summarize'))).toEqual({
-      action: 'summarize',
-      content: 'Selected text',
-      image_url: null,
-      page_url: 'https://example.com/article',
-      page_title: 'Example Article',
-    });
-
+  it('builds document requests from selection context', () => {
     expect(buildCaptureRequest('generate-doc', context('generate-doc')).action).toBe(
       'generate_doc',
     );
   });
 
-  it('uses source-specific content for image, link, and page captures', () => {
+  it('uses source-specific content for image captures', () => {
     expect(
       buildCaptureRequest(
-        'save-image',
-        context('save-image', { imageUrl: 'https://example.com/image.png' }),
+        'save-media',
+        context('save-media', { mediaUrl: 'https://example.com/image.png' }),
       ).content,
-    ).toBe('Image: https://example.com/image.png');
-
-    expect(
-      buildCaptureRequest('save-link', context('save-link', { linkUrl: 'https://example.com/ref' }))
-        .content,
-    ).toBe('Link: https://example.com/ref');
-
-    expect(buildCaptureRequest('save-page', context('save-page')).content).toContain(
-      'URL: https://example.com/article',
-    );
+    ).toBe('Media: https://example.com/image.png');
   });
 
   it('prefers context menu selection text over the page snapshot', () => {
@@ -70,12 +53,51 @@ describe('capture service', () => {
     expect(result).toMatchObject({
       action: 'save-selection',
       selectedText: 'Menu selection',
-      imageUrl: 'https://example.com/image.png',
+      mediaUrl: 'https://example.com/image.png',
     });
   });
 
   it('returns labels for all capture actions', () => {
-    expect(actionLabel('summarize')).toBe('生成摘要');
-    expect(actionLabel('save-page')).toBe('保存页面');
+    expect(actionLabel('generate-doc')).toBe('整理成知识条目');
+  });
+
+  it('collects page snapshot and extracts block text with preserved newlines', () => {
+    // Set up mock DOM
+    document.title = 'Test Title';
+    document.body.innerHTML =
+      '<div id="test-content"><p>Paragraph 1</p><p>Paragraph 2</p><div>Some inline text<br>with break</div></div>';
+
+    const el = document.getElementById('test-content');
+    expect(el).not.toBeNull();
+
+    // Mock Selection API in JSDOM
+    const range = document.createRange();
+    range.selectNodeContents(el!);
+    const selection = window.getSelection();
+    expect(selection).not.toBeNull();
+    selection!.removeAllRanges();
+    selection!.addRange(range);
+
+    const snapshotResult = {
+      pageUrl: window.location.href,
+      pageTitle: document.title,
+      description: undefined,
+      author: undefined,
+      siteName: undefined,
+      favicon: undefined,
+      language: undefined,
+      selectedText: 'Paragraph 1\n\nParagraph 2\n\nSome inline text\nwith break',
+      selectedHtml: el!.innerHTML,
+      selectedImages: [],
+    };
+
+    const result = collectPageSnapshot();
+    expect((result.selectedText || '').replace(/\r\n/g, '\n').trim()).toBe(
+      snapshotResult.selectedText,
+    );
+
+    // Clean up
+    selection!.removeAllRanges();
+    document.body.innerHTML = '';
   });
 });

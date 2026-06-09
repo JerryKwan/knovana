@@ -9,13 +9,12 @@
     History,
   } from '@lucide/svelte';
   import { onMount } from 'svelte';
-  import CapturePreview from '../capture/CapturePreview.svelte';
   import ChatView from '../chat/ChatView.svelte';
   import InputBar from '../chat/InputBar.svelte';
   import KnowledgeView from '../knowledge/KnowledgeView.svelte';
   import HistoryView from '../knowledge/HistoryView.svelte';
   import SettingsPanel from '../settings/SettingsPanel.svelte';
-  import { buildCaptureRequest } from '../../services/capture';
+  import { downloadAndUploadAsset } from '../../services/capture';
   import { sendRuntimeMessage } from '../../services/messaging';
   import {
     clearAppRuntimeState,
@@ -48,11 +47,8 @@
   let activeTab: Tab = 'chat';
   let currentContext: PageSnapshot | null = null;
   let pendingAction: PendingAction | null = null;
-  let captureOutput = '';
-  let capturePath = '';
-  let captureError = '';
   let captureRunning = false;
-  let captureRequestId = '';
+  let captureError = '';
   let messages: ChatMessage[] = [];
   let chatRunning = false;
   let chatRequestId = '';
@@ -82,11 +78,8 @@
       ? [
           activeTab,
           pendingAction,
-          captureOutput,
-          capturePath,
-          captureError,
           captureRunning,
-          captureRequestId,
+          captureError,
           messages,
           chatRunning,
           chatRequestId,
@@ -144,7 +137,7 @@
       payload: { surfaceId },
     }).catch(() => null);
     if (pending) {
-      receivePendingAction(pending);
+      void receivePendingAction(pending);
     }
     runtimeHydrated = true;
   }
@@ -203,11 +196,8 @@
 
     activeTab = state.activeTab;
     pendingAction = state.pendingAction;
-    captureOutput = state.captureOutput;
-    capturePath = state.capturePath;
-    captureError = state.captureError;
     captureRunning = state.captureRunning;
-    captureRequestId = state.captureRequestId;
+    captureError = state.captureError ?? '';
     messages = state.messages;
     chatRunning = state.chatRunning;
     chatRequestId = state.chatRequestId;
@@ -219,11 +209,7 @@
 
   function hasRestorableRuntimeState(state: AppRuntimeState): boolean {
     return Boolean(
-      state.messages.length > 0 ||
-      state.chatRunning ||
-      state.captureRunning ||
-      state.pendingAction ||
-      state.captureOutput,
+      state.messages.length > 0 || state.chatRunning || state.captureRunning || state.pendingAction,
     );
   }
 
@@ -240,11 +226,8 @@
     await saveAppRuntimeState({
       activeTab,
       pendingAction,
-      captureOutput,
-      capturePath,
-      captureError,
       captureRunning,
-      captureRequestId,
+      captureError,
       messages,
       chatRunning,
       chatRequestId,
@@ -303,21 +286,29 @@
     }
 
     if (message.type === 'PENDING_ACTION') {
-      receivePendingAction(message.payload);
+      void receivePendingAction(message.payload);
       return;
     }
     if (message.type !== 'STREAM_EVENT') return;
     handleStreamEvent(message.payload);
   }
 
-  function receivePendingAction(action: PendingAction) {
+  async function receivePendingAction(action: PendingAction) {
+    if (chatRunning) {
+      await stopChat();
+    }
+    messages = [];
+    currentSessionId = undefined;
+    chatInputDraft = '';
+    chatInputDraftTouched = true;
+    clearCapture();
+    await Promise.all([clearCurrentChatSessionId(), clearChatInputDraft(), clearAppRuntimeState()]);
+
     pendingAction = action;
     activeTab = 'chat';
-    captureOutput = '';
-    capturePath = '';
     captureError = '';
     if (action.autoRun) {
-      runCapture();
+      void runCapture();
     }
     void sendRuntimeMessage({
       type: 'ACK_PENDING_ACTION',
@@ -326,18 +317,118 @@
   }
 
   async function runCapture() {
-    if (!pendingAction || captureRunning) return;
+    if (!pendingAction || chatRunning) return;
     captureRunning = true;
-    captureOutput = '';
-    capturePath = '';
     captureError = '';
-    captureRequestId = crypto.randomUUID();
-    await sendRuntimeMessage({
-      type: 'START_CAPTURE',
-      requestId: captureRequestId,
-      surfaceId,
-      payload: buildCaptureRequest(pendingAction.action, pendingAction.context),
-    });
+
+    try {
+      if (pendingAction.customPrompt) {
+        const prompt = pendingAction.customPrompt;
+        clearCapture();
+        await sendChat(prompt);
+        return;
+      }
+
+      const action = pendingAction.action;
+      const context = pendingAction.context;
+
+      let mediaLocalPath = '';
+      if (action === 'save-media' && context.mediaUrl) {
+        const res = await downloadAndUploadAsset(context.mediaUrl);
+        if (res) {
+          mediaLocalPath = `attachments/${res.filename}`;
+        }
+      }
+
+      let selectedText = context.selectedText || '';
+      let selectedHtml = context.selectedHtml || '';
+      let imagesSection = '';
+      if (context.selectedImages && context.selectedImages.length > 0) {
+        const uploadPromises = context.selectedImages.map(async (img) => {
+          const res = await downloadAndUploadAsset(img.src);
+          return { original: img.src, local: res ? `attachments/${res.filename}` : null };
+        });
+        const uploadedImages = await Promise.all(uploadPromises);
+
+        const localRefs = uploadedImages.filter((item) => item.local !== null);
+        if (localRefs.length > 0) {
+          imagesSection =
+            '\n\n【捕获的媒体文件列表】:\n' +
+            localRefs.map((item) => `- ![media](${item.local})`).join('\n');
+        }
+
+        uploadedImages.forEach((img) => {
+          if (img.local) {
+            selectedHtml = selectedHtml.replaceAll(img.original, img.local);
+          }
+        });
+      }
+
+      let prompt = '';
+      if (action === 'generate-doc') {
+        prompt = `【网页捕获：整理成知识条目】
+请根据以下选区内容整理出一篇结构清晰、层次分明的 Markdown 知识条目。
+
+**原始来源**：
+- 页面标题：${context.pageTitle}
+- 页面链接：${context.pageUrl}
+
+**整理内容**：
+"""
+${selectedText || selectedHtml}
+"""${imagesSection}
+
+**具体要求**：
+1. 提炼核心观点与关键知识，使用 \`obsidian-markdown\` 技能规范，形成符合 Obsidian Flavored Markdown (OFM) 格式的笔记（包含 YAML frontmatter、双链 [[Wikilinks]]、必要时使用 [!note] 等 Callouts 块以及高亮 ==text== 等）。
+2. 保持专业度和可读性，剔除页面无关信息。
+3. 请务必使用 \`save_to_kb\` 工具将整理后的条目保存到 Obsidian 知识库中（category 默认设为 'inbox'，title 应当精炼醒目）。
+4. 在回答中向我展示整理后的笔记，并告知文件保存的相对路径。`;
+      } else if (action === 'save-selection') {
+        prompt = `【网页捕获：原样保存并标注】
+请将以下捕获的网页内容原封不动保存到知识库中，并为其分析和提取 2-5 个便于后续分类和检索的标签（tags）。
+
+**原始来源**：
+- 页面标题：${context.pageTitle}
+- 页面链接：${context.pageUrl}
+
+**保存内容**：
+"""
+${selectedText || selectedHtml}
+"""${imagesSection}
+
+**具体要求**：
+1. 请勿修改、重写或润色“保存内容”里的文本，确保原汁原味。
+2. 针对内容主题进行分析，提取出 2-5 个便于后续检索分类的标签。
+3. 务必使用 \`obsidian-markdown\` 技能规范（生成 YAML frontmatter 等）和 \`save_to_kb\` 工具保存该条目（category 默认使用 'inbox'）。
+4. 在回答中向我展示保存的内容与提取的标签，并告知文件保存的相对路径。`;
+      } else if (action === 'save-media') {
+        let notesSection = '';
+        if (selectedText.trim()) {
+          notesSection = `\n**附加说明/备注**：\n"""\n${selectedText.trim()}\n"""\n`;
+        }
+        prompt = `【网页捕获：保存媒体文件】
+请保存以下网页媒体文件，并为其自动分析并提取分类标签。
+
+**原始来源**：
+- 页面标题：${context.pageTitle}
+- 页面链接：${context.pageUrl}
+- 媒体原链接：${context.mediaUrl}
+- 本地保存路径：${mediaLocalPath || 'attachments/'}
+${notesSection}
+**具体要求**：
+1. 结合页面上下文和文件名，以及用户提供的附加说明（如有），提取 2-5 个便于后续分类 and 检索的标签。
+2. 务必使用 \`obsidian-markdown\` 技能规范（生成 YAML frontmatter 等）和 \`save_to_kb\` 工具将此条目保存到 Obsidian 知识库中。请在 content 中以 Markdown 图片语法引用的形式嵌入本地保存路径（如 \`![media](${mediaLocalPath})\`）。如果用户提供了附加说明/备注，请将该备注以文本段落形式保存在图片引用下方。
+3. 在回答中向我展示生成的标签，并告知文件保存的相对路径。`;
+      }
+
+      if (prompt) {
+        clearCapture();
+        await sendChat(prompt);
+      }
+    } catch (err) {
+      captureError = err instanceof Error ? err.message : String(err);
+      captureRunning = false;
+    }
   }
 
   async function sendChat(message: string) {
@@ -382,31 +473,8 @@
   }
 
   function handleStreamEvent(event: ApiStreamEvent) {
-    if (event.stream === 'capture' && event.requestId === captureRequestId) {
-      handleCaptureStream(event);
-      return;
-    }
     if (event.stream === 'chat' && event.requestId === chatRequestId) {
       handleChatStream(event);
-    }
-  }
-
-  function handleCaptureStream(event: ApiStreamEvent) {
-    if (event.status === 'chunk') {
-      captureOutput += event.content ?? '';
-      return;
-    }
-    if (event.status === 'action') {
-      capturePath = event.path ?? capturePath;
-      return;
-    }
-    if (event.status === 'error') {
-      captureError = event.error ?? '处理失败';
-      captureRunning = false;
-      return;
-    }
-    if (event.status === 'done') {
-      captureRunning = false;
     }
   }
 
@@ -598,8 +666,6 @@
 
   function clearCapture() {
     pendingAction = null;
-    captureOutput = '';
-    capturePath = '';
     captureError = '';
     captureRunning = false;
   }
@@ -643,8 +709,7 @@
   }
 
   function handleQuickAction(actionId: string) {
-    if (actionId === 'save-page' || actionId === 'save-selection') {
-      const contextAction = actionId as 'save-page' | 'save-selection';
+    if (actionId === 'save-selection') {
       const pageCtx = currentContext ?? {
         pageUrl: '',
         pageTitle: '',
@@ -652,12 +717,12 @@
       };
       const context: ActionContext = {
         ...pageCtx,
-        action: contextAction,
+        action: 'save-selection',
         selectedImages: pageCtx.selectedImages ?? [],
       };
       receivePendingAction({
         id: crypto.randomUUID(),
-        action: contextAction,
+        action: 'save-selection',
         context,
         autoRun: true,
         createdAt: Date.now(),
@@ -666,7 +731,6 @@
     }
     // Map to sendChat with preset prompts
     const prompts: Record<string, string> = {
-      summarize: '请总结当前页面的主要内容',
       actions: '请从当前页面中提炼关键行动项',
       note: '请将当前页面的关键内容整理为知识笔记',
     };
@@ -862,17 +926,6 @@
             <button type="button" onclick={openSettings} class="notice__link">去设置 →</button>
           </div>
         {/if}
-
-        <CapturePreview
-          pending={pendingAction}
-          output={captureOutput}
-          path={capturePath}
-          running={captureRunning}
-          error={captureError}
-          onRun={runCapture}
-          onClear={clearCapture}
-        />
-
         <section class="view">
           {#if activeTab === 'chat'}
             {#if restoringSession}

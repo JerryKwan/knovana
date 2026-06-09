@@ -1,15 +1,5 @@
 <script lang="ts">
-  import {
-    Brain,
-    ChevronDown,
-    ClipboardList,
-    FileText,
-    Lightbulb,
-    PenLine,
-    Plus,
-    Save,
-    Send,
-  } from '@lucide/svelte';
+  import { Brain, ChevronDown, ClipboardList, FileText, PenLine, Plus, Send } from '@lucide/svelte';
   import { tick } from 'svelte';
 
   export let disabled = false;
@@ -31,20 +21,16 @@
   }
 
   const actionIcons: Record<string, typeof Plus> = {
-    summarize: Lightbulb,
     actions: PenLine,
     note: FileText,
-    'save-page': Save,
     'save-selection': ClipboardList,
   };
 
   const quickActions = [
-    { id: 'summarize', label: '总结页面' },
     { id: 'actions', label: '提炼行动项' },
     { id: 'note', label: '生成知识笔记' },
     { type: 'divider' },
-    { id: 'save-page', label: '保存页面' },
-    { id: 'save-selection', label: '保存选区' },
+    { id: 'save-selection', label: '原样保存并标注' },
   ];
 
   const models = [

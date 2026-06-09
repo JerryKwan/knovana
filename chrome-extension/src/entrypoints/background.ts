@@ -1,5 +1,12 @@
 import { apiJson, apiStream } from '../services/api';
-import { collectPageSnapshot, contextFromMenu, createPendingAction } from '../services/capture';
+import {
+  actionLabel,
+  collectPageSnapshot,
+  contextFromMenu,
+  createPendingAction,
+  downloadAndUploadAsset,
+} from '../services/capture';
+import { generateCapturePrompt } from '../services/capture-prompt';
 import {
   clearPendingAction,
   consumePendingAction,
@@ -7,12 +14,7 @@ import {
   getSettings,
   savePendingAction,
 } from '../services/storage';
-import type {
-  CaptureAction,
-  CaptureRequestBody,
-  PageSnapshot,
-  PendingAction,
-} from '../types/capture';
+import type { CaptureAction, ActionContext, PageSnapshot, PendingAction } from '../types/capture';
 import type {
   ApiStreamEvent,
   ChatRequestBody,
@@ -26,14 +28,7 @@ import type { ExtensionSurface } from '../types/settings';
 const MENU_ROOT_ID = 'knovana';
 const SETTINGS_STORAGE_KEY = 'knovana.settings';
 const POPOUT_PAGE = 'popout.html';
-const CAPTURE_MENU_IDS = new Set<CaptureAction>([
-  'summarize',
-  'generate-doc',
-  'save-selection',
-  'save-image',
-  'save-link',
-  'save-page',
-]);
+const CAPTURE_MENU_IDS = new Set<CaptureAction>(['generate-doc', 'save-selection', 'save-media']);
 
 const activeAbortControllers = new Map<string, AbortController>();
 const streamSurfaceTargets = new Map<string, string>();
@@ -132,12 +127,9 @@ async function createContextMenus(): Promise<void> {
   });
 
   const menus: Array<chrome.contextMenus.CreateProperties & { id: CaptureAction | 'open-chat' }> = [
-    { id: 'summarize', title: '生成摘要', contexts: ['selection'] },
-    { id: 'generate-doc', title: '生成知识文档', contexts: ['selection'] },
-    { id: 'save-selection', title: '保存选区', contexts: ['selection'] },
-    { id: 'save-image', title: '保存图片', contexts: ['image'] },
-    { id: 'save-link', title: '保存链接', contexts: ['link'] },
-    { id: 'save-page', title: '保存当前页面', contexts: ['page'] },
+    { id: 'generate-doc', title: '整理成知识条目', contexts: ['selection'] },
+    { id: 'save-selection', title: '原样保存并标注', contexts: ['selection'] },
+    { id: 'save-media', title: '保存媒体文件', contexts: ['image', 'video', 'audio'] },
     { id: 'open-chat', title: '打开 Knovana', contexts: ['all'] },
   ];
 
@@ -164,12 +156,58 @@ async function handleContextMenu(
   if (!CAPTURE_MENU_IDS.has(info.menuItemId as CaptureAction)) return;
 
   const action = info.menuItemId as CaptureAction;
-  const snapshot = await getTabSnapshot(tab);
-  const pending = createPendingAction(action, contextFromMenu(action, info, snapshot), true);
 
-  await savePendingAction(pending);
-  const openedSurfaceId = await maybeOpenPreferredSurface(tab.windowId);
-  await broadcastPendingAction(pending, openedSurfaceId ?? getActiveSurface()?.surfaceId);
+  const snapshot = await getTabSnapshot(tab);
+  const context = contextFromMenu(action, info, snapshot);
+
+  let mediaLocalPath = '';
+  if (action === 'save-media' && context.mediaUrl) {
+    const res = await downloadAndUploadAsset(context.mediaUrl);
+    if (res) {
+      mediaLocalPath = `attachments/${res.filename}`;
+    }
+  }
+
+  let selectedHtml = context.selectedHtml || '';
+  let imagesSection = '';
+  if (context.selectedImages && context.selectedImages.length > 0) {
+    const uploadPromises = context.selectedImages.map(async (img) => {
+      const res = await downloadAndUploadAsset(img.src);
+      return { original: img.src, local: res ? `attachments/${res.filename}` : null };
+    });
+    const uploadedImages = await Promise.all(uploadPromises);
+
+    const localRefs = uploadedImages.filter((item) => item.local !== null);
+    if (localRefs.length > 0) {
+      imagesSection =
+        '\n\n【捕获的媒体文件列表】:\n' +
+        localRefs.map((item) => `- ![media](${item.local})`).join('\n');
+    }
+
+    uploadedImages.forEach((img) => {
+      if (img.local) {
+        selectedHtml = selectedHtml.replaceAll(img.original, img.local);
+      }
+    });
+  }
+
+  const updatedContext = {
+    ...context,
+    selectedHtml,
+  };
+
+  const initialPrompt = generateCapturePrompt(
+    action,
+    updatedContext,
+    mediaLocalPath,
+    imagesSection,
+  );
+
+  await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: injectCaptureOverlay,
+    args: [initialPrompt, actionLabel(action), snapshot.pageTitle, action, updatedContext],
+  });
 }
 
 async function handleCommand(command: string): Promise<void> {
@@ -232,6 +270,29 @@ async function handleRuntimeMessage(
       }
       return okResponse(null);
 
+    case 'CAPTURE_SUBMIT': {
+      const tab = sender.tab;
+      if (!tab || tab.windowId === undefined) return okResponse(null);
+
+      const { prompt, action, context } = message.payload;
+      const pending: PendingAction = {
+        id: crypto.randomUUID(),
+        action,
+        context,
+        autoRun: true,
+        customPrompt: prompt,
+        createdAt: Date.now(),
+      };
+
+      await savePendingAction(pending);
+      const openedSurfaceId = await openPreferredSurface(tab.windowId);
+      await broadcastPendingAction(pending, openedSurfaceId ?? getActiveSurface()?.surfaceId);
+      return okResponse(null);
+    }
+
+    case 'CAPTURE_CANCEL':
+      return okResponse(null);
+
     case 'START_CHAT':
       streamSurfaceTargets.set(message.requestId, resolveMessageSurfaceId(message.surfaceId));
       void streamChat(message.requestId, message.payload);
@@ -245,11 +306,6 @@ async function handleRuntimeMessage(
     case 'ABORT_CHAT':
       abortChat(message.requestId);
       return okResponse(null);
-
-    case 'START_CAPTURE':
-      streamSurfaceTargets.set(message.requestId, resolveMessageSurfaceId(message.surfaceId));
-      void streamCapture(message.requestId, message.payload);
-      return okResponse({ requestId: message.requestId });
 
     case 'GET_KNOWLEDGE':
       return okResponse(
@@ -438,48 +494,6 @@ async function streamRegenerate(requestId: string, payload: { session_id: string
     }
   } finally {
     activeAbortControllers.delete(requestId);
-    streamSurfaceTargets.delete(requestId);
-  }
-}
-
-async function streamCapture(requestId: string, payload: CaptureRequestBody): Promise<void> {
-  await sendStreamEvent({ requestId, stream: 'capture', status: 'start' });
-
-  try {
-    await apiStream('/capture', payload, async ({ raw, json }) => {
-      if (isRecord(json) && json.type === 'action') {
-        await sendStreamEvent({
-          requestId,
-          stream: 'capture',
-          status: 'action',
-          action: typeof json.action === 'string' ? json.action : undefined,
-          path: typeof json.path === 'string' ? json.path : undefined,
-        });
-        return;
-      }
-
-      if (isRecord(json) && json.type === 'error') {
-        await sendStreamEvent({
-          requestId,
-          stream: 'capture',
-          status: 'error',
-          error: typeof json.message === 'string' ? json.message : raw,
-        });
-        return;
-      }
-
-      const content = isRecord(json) && typeof json.content === 'string' ? json.content : raw;
-      await sendStreamEvent({ requestId, stream: 'capture', status: 'chunk', content });
-    });
-    await sendStreamEvent({ requestId, stream: 'capture', status: 'done' });
-  } catch (error) {
-    await sendStreamEvent({
-      requestId,
-      stream: 'capture',
-      status: 'error',
-      error: getErrorMessage(error),
-    });
-  } finally {
     streamSurfaceTargets.delete(requestId);
   }
 }
@@ -831,6 +845,360 @@ function getErrorMessage(error: unknown): string {
   return String(error);
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
+function injectCaptureOverlay(
+  initialPrompt: string,
+  actionName: string,
+  pageTitle: string,
+  action: CaptureAction,
+  context: ActionContext,
+): void {
+  const existing = document.getElementById('knovana-capture-overlay-host');
+  if (existing) {
+    existing.remove();
+  }
+
+  const host = document.createElement('div');
+  host.id = 'knovana-capture-overlay-host';
+  host.style.position = 'fixed';
+  host.style.zIndex = '2147483647';
+  host.style.top = '0';
+  host.style.left = '0';
+  host.style.width = '100vw';
+  host.style.height = '100vh';
+  host.style.pointerEvents = 'auto';
+
+  const shadow = host.attachShadow({ mode: 'open' });
+
+  const style = document.createElement('style');
+  style.textContent = `
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    .backdrop {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(18, 17, 16, 0.4);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      transition: opacity 250ms cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .backdrop.visible {
+      opacity: 1;
+    }
+    .card {
+      background: #FDFBF7;
+      border: 1px solid rgba(138, 126, 109, 0.25);
+      border-radius: 16px;
+      width: 640px;
+      max-width: 90%;
+      max-height: 85vh;
+      box-shadow: 0 24px 48px -12px rgba(45, 41, 35, 0.15), 0 8px 16px -8px rgba(45, 41, 35, 0.1);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      color: #3D3A35;
+      transform: scale(0.95) translateY(10px);
+      transition: transform 250ms cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    .backdrop.visible .card {
+      transform: scale(1) translateY(0);
+    }
+    
+    .header {
+      padding: 18px 24px;
+      border-bottom: 1px solid rgba(138, 126, 109, 0.15);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: #FAF7F2;
+    }
+    .brand-section {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .logo {
+      width: 24px;
+      height: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(135deg, #10B981 0%, #3B82F6 100%);
+      border-radius: 6px;
+      color: #FFFFFF;
+      font-weight: bold;
+      font-size: 14px;
+      box-shadow: 0 2px 4px rgba(59, 130, 246, 0.2);
+    }
+    .logo-text {
+      font-weight: 700;
+      font-size: 16px;
+      letter-spacing: -0.01em;
+      color: #2D2B28;
+    }
+    .close-btn {
+      background: transparent;
+      border: 0;
+      cursor: pointer;
+      color: #8A7E6D;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 6px;
+      border-radius: 50%;
+      transition: background 200ms ease, color 200ms ease;
+    }
+    .close-btn:hover {
+      background: rgba(138, 126, 109, 0.1);
+      color: #3D3A35;
+    }
+
+    .content {
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      overflow-y: auto;
+      flex: 1;
+    }
+    .meta-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+    }
+    .action-badge {
+      background: #EFEBE4;
+      color: #72634E;
+      font-weight: 600;
+      padding: 4px 10px;
+      border-radius: 6px;
+      border: 1px solid rgba(138, 126, 109, 0.15);
+      font-size: 12px;
+    }
+    .source-title {
+      color: #8A7E6D;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+      overflow: hidden;
+      flex: 1;
+    }
+
+    .prompt-section {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .label-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 12px;
+      font-weight: 600;
+      color: #8A7E6D;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .prompt-textarea {
+      width: 100%;
+      height: 280px;
+      padding: 16px;
+      border: 1px solid rgba(138, 126, 109, 0.3);
+      border-radius: 10px;
+      background: #FFFFFF;
+      color: #3D3A35;
+      font-family: ui-monospace, SFMono-Regular, SF Pro Mono, Menlo, Monaco, Consolas, monospace;
+      font-size: 13px;
+      line-height: 1.6;
+      resize: vertical;
+      outline: none;
+      transition: border-color 200ms ease, box-shadow 200ms ease;
+    }
+    .prompt-textarea:focus {
+      border-color: #C5A880;
+      box-shadow: 0 0 0 3px rgba(197, 168, 128, 0.15);
+    }
+
+    .footer {
+      padding: 16px 24px;
+      border-top: 1px solid rgba(138, 126, 109, 0.15);
+      display: flex;
+      justify-content: flex-end;
+      gap: 12px;
+      background: #FAF7F2;
+    }
+    .btn {
+      font-size: 14px;
+      font-weight: 600;
+      padding: 10px 20px;
+      border-radius: 8px;
+      cursor: pointer;
+      border: 0;
+      transition: all 200ms ease;
+    }
+    .btn-cancel {
+      background: transparent;
+      color: #8A7E6D;
+      border: 1px solid rgba(138, 126, 109, 0.3);
+    }
+    .btn-cancel:hover {
+      background: rgba(138, 126, 109, 0.08);
+      color: #3D3A35;
+    }
+    .btn-send {
+      background: #2D2B28;
+      color: #FAF7F2;
+      box-shadow: 0 4px 12px rgba(45, 43, 40, 0.15);
+    }
+    .btn-send:hover {
+      background: #1C1B19;
+      transform: translateY(-1px);
+      box-shadow: 0 6px 16px rgba(45, 43, 40, 0.2);
+    }
+    .btn-send:active {
+      transform: translateY(0);
+    }
+  `;
+
+  const backdrop = document.createElement('div');
+  backdrop.className = 'backdrop';
+
+  const card = document.createElement('div');
+  card.className = 'card';
+
+  const header = document.createElement('div');
+  header.className = 'header';
+
+  const brand = document.createElement('div');
+  brand.className = 'brand-section';
+  const logo = document.createElement('div');
+  logo.className = 'logo';
+  logo.textContent = 'K';
+  const logoText = document.createElement('div');
+  logoText.className = 'logo-text';
+  logoText.textContent = 'Knovana';
+  brand.appendChild(logo);
+  brand.appendChild(logoText);
+
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'close-btn';
+  closeBtn.innerHTML =
+    '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
+  header.appendChild(brand);
+  header.appendChild(closeBtn);
+
+  const content = document.createElement('div');
+  content.className = 'content';
+
+  const metaBar = document.createElement('div');
+  metaBar.className = 'meta-bar';
+  const badge = document.createElement('span');
+  badge.className = 'action-badge';
+  badge.textContent = actionName;
+  const source = document.createElement('span');
+  source.className = 'source-title';
+  source.textContent = `来源: ${pageTitle}`;
+  metaBar.appendChild(badge);
+  metaBar.appendChild(source);
+
+  const promptSection = document.createElement('div');
+  promptSection.className = 'prompt-section';
+  const labelRow = document.createElement('div');
+  labelRow.className = 'label-row';
+  labelRow.innerHTML = '<span>提示词预览 (可以直接编辑修改)</span>';
+  const textarea = document.createElement('textarea');
+  textarea.className = 'prompt-textarea';
+  textarea.value = initialPrompt;
+  textarea.spellcheck = false;
+
+  promptSection.appendChild(labelRow);
+  promptSection.appendChild(textarea);
+
+  content.appendChild(metaBar);
+  content.appendChild(promptSection);
+
+  const footer = document.createElement('div');
+  footer.className = 'footer';
+
+  const btnCancel = document.createElement('button');
+  btnCancel.className = 'btn btn-cancel';
+  btnCancel.textContent = '取消';
+
+  const btnSend = document.createElement('button');
+  btnSend.className = 'btn btn-send';
+  btnSend.textContent = '发送并整理';
+
+  footer.appendChild(btnCancel);
+  footer.appendChild(btnSend);
+
+  card.appendChild(header);
+  card.appendChild(content);
+  card.appendChild(footer);
+  backdrop.appendChild(card);
+
+  shadow.appendChild(style);
+  shadow.appendChild(backdrop);
+  document.body.appendChild(host);
+
+  requestAnimationFrame(() => {
+    backdrop.classList.add('visible');
+  });
+
+  function closeOverlay(submit = false, finalPrompt = '') {
+    backdrop.classList.remove('visible');
+    card.style.transform = 'scale(0.95) translateY(10px)';
+
+    if (submit) {
+      chrome.runtime.sendMessage({
+        type: 'CAPTURE_SUBMIT',
+        payload: { prompt: finalPrompt, action, context },
+      });
+    } else {
+      chrome.runtime.sendMessage({
+        type: 'CAPTURE_CANCEL',
+      });
+    }
+
+    setTimeout(() => {
+      host.remove();
+    }, 250);
+  }
+
+  closeBtn.addEventListener('click', () => closeOverlay(false));
+  btnCancel.addEventListener('click', () => closeOverlay(false));
+  btnSend.addEventListener('click', () => closeOverlay(true, textarea.value));
+
+  let isMouseDownOnBackdrop = false;
+  backdrop.addEventListener('mousedown', (e) => {
+    isMouseDownOnBackdrop = e.target === backdrop;
+  });
+
+  backdrop.addEventListener('click', (e) => {
+    if (e.target === backdrop && isMouseDownOnBackdrop) {
+      closeOverlay(false);
+    }
+  });
+
+  const handleKeyDown = (e: KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      closeOverlay(false);
+      window.removeEventListener('keydown', handleKeyDown);
+    }
+  };
+  window.addEventListener('keydown', handleKeyDown);
+
+  setTimeout(() => {
+    textarea.focus();
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+  }, 100);
 }

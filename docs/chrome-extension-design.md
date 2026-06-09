@@ -248,8 +248,8 @@ export default defineBackground(() => {
       { id: 'summarize',       title: '📝 生成摘要',         contexts: ['selection'] },
       { id: 'generate-doc',    title: '📄 生成知识文档',     contexts: ['selection'] },
       { id: 'save-selection',   title: '💾 保存到知识库',     contexts: ['selection'] },
-      // 图片
-      { id: 'save-image',      title: '🖼️ 保存图片到知识库', contexts: ['image'] },
+      // 媒体
+      { id: 'save-media',      title: '🖼️ 保存媒体文件',     contexts: ['image', 'video', 'audio'] },
       // 链接
       { id: 'save-link',       title: '🔗 保存链接',        contexts: ['link'] },
       // 页面级

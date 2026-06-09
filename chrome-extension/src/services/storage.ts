@@ -19,11 +19,11 @@ export interface PopoutBounds {
 export interface AppRuntimeState {
   activeTab: 'chat' | 'knowledge' | 'history';
   pendingAction: PendingAction | null;
-  captureOutput: string;
-  capturePath: string;
-  captureError: string;
+  captureOutput?: string;
+  capturePath?: string;
+  captureError?: string;
   captureRunning: boolean;
-  captureRequestId: string;
+  captureRequestId?: string;
   messages: ChatMessage[];
   chatRunning: boolean;
   chatRequestId: string;

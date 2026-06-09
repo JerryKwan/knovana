@@ -326,6 +326,7 @@
     cursor: pointer;
     text-align: left;
     outline: none;
+    min-width: 0;
   }
 
   .session-card:hover {
@@ -429,7 +430,8 @@
     color: var(--kn-text-muted);
     width: 26px;
     height: 26px;
-    opacity: 0;
+    opacity: 0.5;
+    flex-shrink: 0;
     transition:
       opacity 180ms ease,
       background 150ms ease,
@@ -437,7 +439,8 @@
     cursor: pointer;
   }
 
-  .session-card:hover .delete-btn {
+  .session-card:hover .delete-btn,
+  .session-card:focus-within .delete-btn {
     opacity: 1;
   }
 
