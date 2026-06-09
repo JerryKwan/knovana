@@ -202,6 +202,32 @@ describe('ChatView', () => {
     expect(output?.textContent).toContain('"files": [\n    "a.ts",\n    "b.ts"\n  ]');
   });
 
+  it('jumps to the bottom without animation when existing messages mount initially', async () => {
+    render(ChatView, {
+      props: {
+        messages: [
+          userMessage('恢复之前的问题'),
+          assistantMessage({
+            id: 'assistant-restored',
+            content: '恢复之前的回答',
+            blocks: [{ type: 'text', text: '恢复之前的回答' }],
+          }),
+        ],
+      },
+    });
+
+    await waitFor(() =>
+      expect(scrollToMock).toHaveBeenCalledWith({
+        top: 640,
+        behavior: 'auto',
+      }),
+    );
+    expect(scrollToMock).not.toHaveBeenCalledWith({
+      top: 640,
+      behavior: 'smooth',
+    });
+  });
+
   it('scrolls to the bottom when a new message batch appears', async () => {
     const { rerender } = render(ChatView, {
       props: {

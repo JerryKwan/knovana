@@ -24,6 +24,7 @@
   let scheduledErrors = new SvelteSet<string>();
   let messageListEl: HTMLDivElement | null = null;
   let shouldStickToBottom = true;
+  let scrollStateInitialized = false;
   let previousScrollSignature = '';
   let previousMessageCount = 0;
 
@@ -51,14 +52,20 @@
 
   $: {
     const nextScrollSignature = getScrollSignature(messages);
-    if (nextScrollSignature !== previousScrollSignature) {
+    if (!scrollStateInitialized || nextScrollSignature !== previousScrollSignature) {
+      const isInitialScrollSync = !scrollStateInitialized;
       const messageCountChanged = messages.length !== previousMessageCount;
       previousScrollSignature = nextScrollSignature;
       previousMessageCount = messages.length;
+      scrollStateInitialized = true;
 
-      const shouldScroll = messageCountChanged || shouldStickToBottom;
+      if (messages.length === 0) {
+        shouldStickToBottom = true;
+      }
+
+      const shouldScroll = messages.length > 0 && (messageCountChanged || shouldStickToBottom);
       if (shouldScroll) {
-        void scrollToBottom(messageCountChanged ? 'smooth' : 'auto');
+        void scrollToBottom(isInitialScrollSync ? 'auto' : messageCountChanged ? 'smooth' : 'auto');
       }
     }
   }
@@ -449,7 +456,6 @@
     display: grid;
     max-width: 300px;
     justify-items: center;
-    animation: fadeInUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   }
 
   .empty-inner h2 {
@@ -467,17 +473,6 @@
     font-size: 12.5px;
     line-height: 1.6;
     letter-spacing: 0.02em;
-  }
-
-  @keyframes fadeInUp {
-    from {
-      opacity: 0;
-      transform: translateY(10px);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
   }
 
   .message-list {

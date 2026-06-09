@@ -138,15 +138,15 @@
     if (!restoredRuntime) {
       await restoreCurrentSession();
     }
-    runtimeHydrated = true;
 
     const pending = await sendRuntimeMessage<PendingAction | null>({
       type: 'CONSUME_PENDING_ACTION',
       payload: { surfaceId },
-    });
+    }).catch(() => null);
     if (pending) {
       receivePendingAction(pending);
     }
+    runtimeHydrated = true;
   }
 
   async function loadTargetBrowserWindowId() {
@@ -851,51 +851,57 @@
     </div>
   {:else}
     <div class="stage">
-      {#if !hasToken}
-        <div class="notice">
-          <span>尚未配置访问令牌</span>
-          <button type="button" onclick={openSettings} class="notice__link">去设置 →</button>
-        </div>
-      {/if}
+      {#if !runtimeHydrated}
+        <section class="view">
+          <div class="restore-state" role="status">正在恢复当前状态...</div>
+        </section>
+      {:else}
+        {#if !hasToken}
+          <div class="notice">
+            <span>尚未配置访问令牌</span>
+            <button type="button" onclick={openSettings} class="notice__link">去设置 →</button>
+          </div>
+        {/if}
 
-      <CapturePreview
-        pending={pendingAction}
-        output={captureOutput}
-        path={capturePath}
-        running={captureRunning}
-        error={captureError}
-        onRun={runCapture}
-        onClear={clearCapture}
-      />
+        <CapturePreview
+          pending={pendingAction}
+          output={captureOutput}
+          path={capturePath}
+          running={captureRunning}
+          error={captureError}
+          onRun={runCapture}
+          onClear={clearCapture}
+        />
 
-      <section class="view">
-        {#if activeTab === 'chat'}
-          {#if restoringSession}
-            <div class="restore-state" role="status">正在恢复当前对话...</div>
+        <section class="view">
+          {#if activeTab === 'chat'}
+            {#if restoringSession}
+              <div class="restore-state" role="status">正在恢复当前对话...</div>
+            {:else}
+              <ChatView {messages} isStreaming={chatRunning} onRegenerate={handleRegenerate} />
+            {/if}
+          {:else if activeTab === 'knowledge'}
+            <KnowledgeView />
           {:else}
-            <ChatView {messages} isStreaming={chatRunning} onRegenerate={handleRegenerate} />
+            <HistoryView
+              on:select={handleSelectSession}
+              on:newSession={startNewSession}
+              on:delete={handleDeleteSession}
+            />
           {/if}
-        {:else if activeTab === 'knowledge'}
-          <KnowledgeView />
-        {:else}
-          <HistoryView
-            on:select={handleSelectSession}
-            on:newSession={startNewSession}
-            on:delete={handleDeleteSession}
+        </section>
+
+        {#if activeTab === 'chat'}
+          <InputBar
+            disabled={chatRunning || restoringSession}
+            onSubmit={sendChat}
+            onStop={stopChat}
+            value={chatInputDraft}
+            onValueChange={handleChatInputDraftChange}
+            bind:selectedModel
+            onQuickAction={handleQuickAction}
           />
         {/if}
-      </section>
-
-      {#if activeTab === 'chat'}
-        <InputBar
-          disabled={chatRunning || restoringSession}
-          onSubmit={sendChat}
-          onStop={stopChat}
-          value={chatInputDraft}
-          onValueChange={handleChatInputDraftChange}
-          bind:selectedModel
-          onQuickAction={handleQuickAction}
-        />
       {/if}
     </div>
   {/if}
