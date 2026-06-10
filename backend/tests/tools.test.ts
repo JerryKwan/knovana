@@ -47,6 +47,78 @@ describe("Agent Tools - read_attachment & attachment_manager import", () => {
       expect(result.content[0].text).toBe(fileContent);
     });
 
+    it("should truncate oversized text previews", async () => {
+      const filename = "large_note.md";
+      const fileContent = "A".repeat(12_050);
+      await writeFile(
+        join(tempKbRoot, "attachments", filename),
+        fileContent,
+        "utf8",
+      );
+
+      const result = await (tool.handler as any)({ filename });
+      const text = result.content[0].text as string;
+      expect(result.isError).toBeUndefined();
+      expect(text).not.toBe(fileContent);
+      expect(text.startsWith("A".repeat(100))).toBe(true);
+      expect(text).toContain("内容已截断");
+      expect(text).toContain("原附件仍完整保存");
+    });
+
+    it("should parse document attachments with a fixed first-three-pages preview", async () => {
+      const filename = "report.pdf";
+      const filePath = join(tempKbRoot, "attachments", filename);
+      const calls: Array<{
+        command: string;
+        args: string[];
+        options: { timeoutMs: number; maxBufferBytes: number };
+      }> = [];
+      const docTool = createReadAttachmentTool(ctx, {
+        commandRunner: async (command, args, options) => {
+          calls.push({ command, args, options });
+          return { stdout: "第一页内容\n第二页内容", stderr: "" };
+        },
+      });
+      await writeFile(filePath, Buffer.from("%PDF-1.7"));
+
+      const result = await (docTool.handler as any)({ filename });
+      const text = result.content[0].text as string;
+
+      expect(result.isError).toBeUndefined();
+      expect(calls).toHaveLength(1);
+      expect(calls[0].command).toBe("lit");
+      expect(calls[0].args).toEqual([
+        "parse",
+        filePath,
+        "--format",
+        "text",
+        "--target-pages",
+        "1-3",
+      ]);
+      expect(calls[0].options.timeoutMs).toBe(30_000);
+      expect(text).toContain("仅解析附件前 3 页");
+      expect(text).toContain("第一页内容");
+    });
+
+    it("should degrade to document metadata when preview parsing fails", async () => {
+      const filename = "broken.docx";
+      const content = Buffer.from([1, 2, 3, 4]);
+      const docTool = createReadAttachmentTool(ctx, {
+        commandRunner: async () => {
+          throw new Error("lit is unavailable");
+        },
+      });
+      await writeFile(join(tempKbRoot, "attachments", filename), content);
+
+      const result = await (docTool.handler as any)({ filename });
+      const text = result.content[0].text as string;
+
+      expect(result.isError).toBeUndefined();
+      expect(text).toContain("文档解析预览不可用");
+      expect(text).toContain("lit is unavailable");
+      expect(text).toContain("大小: 4 字节");
+    });
+
     it("should return metadata for binary files", async () => {
       const filename = "image.png";
       const binaryData = Buffer.from([1, 2, 3, 4]);

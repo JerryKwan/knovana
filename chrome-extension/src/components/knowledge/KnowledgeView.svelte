@@ -8,6 +8,7 @@
     ArrowLeft,
     Copy,
     Check,
+    Plus,
   } from '@lucide/svelte';
   import { onMount, onDestroy } from 'svelte';
   import { sendRuntimeMessage } from '../../services/messaging';
@@ -20,14 +21,22 @@
   import Markdown from '../common/Markdown.svelte';
   import StatusPill from '../common/StatusPill.svelte';
 
+  const PAGE_SIZE = 20;
+
   // 1. Core library list states
   let entries: KnowledgeEntry[] = [];
   let selected: KnowledgeDetail | null = null;
   let listLoading = true;
+  let listLoadingMore = false;
   let listError = '';
+  let listTotal = 0;
+  let listNextPageToLoad = 1;
+  let listHasMore = false;
   let copied = false;
   let deletingEntryId: string | null = null;
   let showDetailDeleteConfirm = false;
+
+  $: listHasMore = entries.length < listTotal;
 
   async function handleCopy() {
     if (!selected) return;
@@ -51,17 +60,54 @@
   let searchError = '';
   let searchTimer: ReturnType<typeof setTimeout>;
 
-  async function loadEntries() {
-    listLoading = true;
+  async function loadEntries(nextPage = 1, mode: 'replace' | 'append' = 'replace') {
+    const append = mode === 'append';
+    if (append) {
+      listLoadingMore = true;
+    } else {
+      listLoading = true;
+    }
     listError = '';
     try {
-      const response = await sendRuntimeMessage<KnowledgeListResponse>({ type: 'GET_KNOWLEDGE' });
-      entries = response.entries ?? [];
+      const response = await sendRuntimeMessage<KnowledgeListResponse>({
+        type: 'GET_KNOWLEDGE',
+        payload: { page: nextPage },
+      });
+      const incoming = response.entries ?? [];
+      entries = append ? mergeEntries(entries, incoming) : incoming;
+      listTotal = response.total ?? entries.length;
+      listNextPageToLoad = (response.page ?? nextPage) + 1;
     } catch (err) {
       listError = err instanceof Error ? err.message : String(err);
     } finally {
-      listLoading = false;
+      if (append) {
+        listLoadingMore = false;
+      } else {
+        listLoading = false;
+      }
     }
+  }
+
+  function mergeEntries(currentEntries: KnowledgeEntry[], incomingEntries: KnowledgeEntry[]) {
+    return [
+      ...currentEntries,
+      ...incomingEntries.filter(
+        (entry, index) =>
+          !currentEntries.some((current) => current.id === entry.id) &&
+          incomingEntries.findIndex((incoming) => incoming.id === entry.id) === index,
+      ),
+    ];
+  }
+
+  async function loadMoreEntries() {
+    if (listLoading || listLoadingMore || !listHasMore) return;
+    await loadEntries(listNextPageToLoad, 'append');
+  }
+
+  async function refreshEntries() {
+    deletingEntryId = null;
+    listNextPageToLoad = 1;
+    await loadEntries(1);
   }
 
   async function openEntry(entry: KnowledgeEntry) {
@@ -93,8 +139,10 @@
     try {
       await sendRuntimeMessage({ type: 'DELETE_KNOWLEDGE', payload: { id } });
       if (selected?.id === id) selected = null;
+      entries = entries.filter((entry) => entry.id !== id);
+      listTotal = Math.max(0, listTotal - 1);
+      listNextPageToLoad = Math.max(1, Math.floor(entries.length / PAGE_SIZE) + 1);
       deletingEntryId = null;
-      await loadEntries();
     } catch (err) {
       listError = err instanceof Error ? err.message : String(err);
       deletingEntryId = null;
@@ -103,11 +151,14 @@
 
   async function executeDetailDelete() {
     if (!selected) return;
+    const id = selected.id;
     try {
-      await sendRuntimeMessage({ type: 'DELETE_KNOWLEDGE', payload: { id: selected.id } });
+      await sendRuntimeMessage({ type: 'DELETE_KNOWLEDGE', payload: { id } });
+      entries = entries.filter((entry) => entry.id !== id);
+      listTotal = Math.max(0, listTotal - 1);
+      listNextPageToLoad = Math.max(1, Math.floor(entries.length / PAGE_SIZE) + 1);
       selected = null;
       showDetailDeleteConfirm = false;
-      await loadEntries();
     } catch (err) {
       listError = err instanceof Error ? err.message : String(err);
       showDetailDeleteConfirm = false;
@@ -282,7 +333,7 @@
               <BookOpen size={14} class="text-[color:var(--kn-primary)]" />
               <span>全部存档</span>
             </div>
-            <button type="button" class="toolbar-button" title="刷新列表" onclick={loadEntries}>
+            <button type="button" class="toolbar-button" title="刷新列表" onclick={refreshEntries}>
               <RefreshCw size={13} class={listLoading ? 'animate-spin' : ''} />
             </button>
           </header>
@@ -360,6 +411,26 @@
                   {/if}
                 </article>
               {/each}
+            </div>
+            <div class="list-footer">
+              {#if listHasMore}
+                <button
+                  type="button"
+                  class="load-more-btn"
+                  disabled={listLoading || listLoadingMore}
+                  onclick={loadMoreEntries}
+                >
+                  {#if listLoadingMore}
+                    <RefreshCw size={13} class="animate-spin" />
+                    <span>加载中...</span>
+                  {:else}
+                    <Plus size={13} />
+                    <span>加载更多</span>
+                  {/if}
+                </button>
+              {:else}
+                <span class="end-hint">已加载全部 {listTotal} 条</span>
+              {/if}
             </div>
           {/if}
         {/if}
@@ -595,6 +666,49 @@
     padding: 12px;
     margin-bottom: 12px;
     box-shadow: var(--kn-shadow-soft);
+  }
+
+  .list-footer {
+    display: grid;
+    place-items: center;
+    padding: 12px 0 2px;
+  }
+
+  .load-more-btn {
+    display: inline-flex;
+    min-height: 31px;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    border: 1px solid var(--kn-border);
+    border-radius: 8px;
+    background: var(--kn-field-bg);
+    color: var(--kn-text);
+    font-size: 12px;
+    font-weight: 700;
+    padding: 0 12px;
+    cursor: pointer;
+    transition:
+      background 150ms ease,
+      border-color 150ms ease,
+      color 150ms ease;
+  }
+
+  .load-more-btn:hover:not(:disabled) {
+    border-color: color-mix(in srgb, var(--kn-primary) 34%, var(--kn-border));
+    background: var(--kn-primary-soft);
+    color: var(--kn-primary);
+  }
+
+  .load-more-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.65;
+  }
+
+  .end-hint {
+    color: var(--kn-text-muted);
+    font-size: 11.5px;
+    font-weight: 600;
   }
 
   .detail-container {

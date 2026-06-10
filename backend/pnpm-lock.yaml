@@ -16,6 +16,9 @@ importers:
       "@hono/zod-openapi":
         specifier: ^0.18.4
         version: 0.18.4(hono@4.12.23)(zod@3.25.76)
+      "@llamaindex/liteparse":
+        specifier: ^2.0.7
+        version: 2.0.7
       bcryptjs:
         specifier: ^2.4.3
         version: 2.4.3
@@ -771,6 +774,70 @@ packages:
         integrity: sha512-cYQ9310grqxueWbl+WuIUIaiUaDcj7WOq5fVhEljNVgRfOUhY9fy2zTvfoqWsnebh8Sl70VScFbICvJnLKB0Og==,
       }
 
+  "@llamaindex/liteparse-darwin-arm64@2.0.7":
+    resolution:
+      {
+        integrity: sha512-gp0/4kk9wBAuE2L8PVPb1o81QvOEgpvWb7E8bfCQICcxQvhqyEtt8ENaoXX/O1GGBr0YSM0iMTlUEK5i5diBnQ==,
+      }
+    cpu: [arm64]
+    os: [darwin]
+
+  "@llamaindex/liteparse-darwin-x64@2.0.7":
+    resolution:
+      {
+        integrity: sha512-RYkO0LwurVI50KnVVteAURG2Swlt1CHxFSW73Hc7uyD9tuBtcKhDdSk+J4yaWcl/jgssFPkNayRdbwNF2DBTow==,
+      }
+    cpu: [x64]
+    os: [darwin]
+
+  "@llamaindex/liteparse-linux-arm64-gnu@2.0.7":
+    resolution:
+      {
+        integrity: sha512-G46pzzhgHsbMgwCsHz5YaW1inzTHMCUimipWadq/7+/oZTe9HPT4xi40vdSVwH1xdVXlmn/du9PICcSWhQn83A==,
+      }
+    cpu: [arm64]
+    os: [linux]
+
+  "@llamaindex/liteparse-linux-x64-gnu@2.0.7":
+    resolution:
+      {
+        integrity: sha512-XaiN5gmYd548EWqyONur7xT+3+oii5xE9WCSDudmvi01Q4G7N0JHW3B1LIBUxno789sSg9ME71UGezmGP847oQ==,
+      }
+    cpu: [x64]
+    os: [linux]
+
+  "@llamaindex/liteparse-linux-x64-musl@2.0.7":
+    resolution:
+      {
+        integrity: sha512-60p0CldANiV/oPoXOvaA3A5bNnp3XJurcKX0Tt0rK5MK/SJBMdJonXQ8hwpDgtV6MsD4Yhz66HzU1BxU4BlUqA==,
+      }
+    cpu: [x64]
+    os: [linux]
+
+  "@llamaindex/liteparse-win32-arm64-msvc@2.0.7":
+    resolution:
+      {
+        integrity: sha512-5ZNn0o2pk3VPKp7safKWrduUqKXxJAP4ABAcjD7bvvJYnqLvdM7DRFhbnXKVRjBU9/nDyxSM64b3xkXgarBfSg==,
+      }
+    cpu: [arm64]
+    os: [win32]
+
+  "@llamaindex/liteparse-win32-x64-msvc@2.0.7":
+    resolution:
+      {
+        integrity: sha512-38B19yhzQ96z2XEvxl5cLUgnfFxX26nK8LH3zpdIdUvN+ZnXGXF9C//qpCRYsUJDcnLekAIqQFSsmgfULRj6aw==,
+      }
+    cpu: [x64]
+    os: [win32]
+
+  "@llamaindex/liteparse@2.0.7":
+    resolution:
+      {
+        integrity: sha512-zeALIO99c+mnTnvI52dSMrw5yzrjxYtWkthcc+Epsho7jI2rVDVXQH1cfVws73Jt3RPToOLuojqJLJe4ZbZpsg==,
+      }
+    engines: { node: ">=18.0.0" }
+    hasBin: true
+
   "@modelcontextprotocol/sdk@1.29.0":
     resolution:
       {
@@ -1344,6 +1411,13 @@ packages:
       {
         integrity: sha512-dOy+3AuW3a2wNbZHIuMZpTcgjGuLU/uBL/ubcZF9OXbDo8ff4O8yVp5Bf0efS8uEoYo5q4Fx7dY9OgQGXgAsQA==,
       }
+
+  commander@12.1.0:
+    resolution:
+      {
+        integrity: sha512-Vw8qHK3bZM9y/P10u3Vib8o/DdkvA2OtPtZvD871QKjy74Wj1WSKFILMPRPSdUSx5RFK1arlJzEtA4PkFgnbuA==,
+      }
+    engines: { node: ">=18" }
 
   concat-map@0.0.1:
     resolution:
@@ -3043,6 +3117,39 @@ snapshots:
 
   "@jridgewell/sourcemap-codec@1.5.5": {}
 
+  "@llamaindex/liteparse-darwin-arm64@2.0.7":
+    optional: true
+
+  "@llamaindex/liteparse-darwin-x64@2.0.7":
+    optional: true
+
+  "@llamaindex/liteparse-linux-arm64-gnu@2.0.7":
+    optional: true
+
+  "@llamaindex/liteparse-linux-x64-gnu@2.0.7":
+    optional: true
+
+  "@llamaindex/liteparse-linux-x64-musl@2.0.7":
+    optional: true
+
+  "@llamaindex/liteparse-win32-arm64-msvc@2.0.7":
+    optional: true
+
+  "@llamaindex/liteparse-win32-x64-msvc@2.0.7":
+    optional: true
+
+  "@llamaindex/liteparse@2.0.7":
+    dependencies:
+      commander: 12.1.0
+    optionalDependencies:
+      "@llamaindex/liteparse-darwin-arm64": 2.0.7
+      "@llamaindex/liteparse-darwin-x64": 2.0.7
+      "@llamaindex/liteparse-linux-arm64-gnu": 2.0.7
+      "@llamaindex/liteparse-linux-x64-gnu": 2.0.7
+      "@llamaindex/liteparse-linux-x64-musl": 2.0.7
+      "@llamaindex/liteparse-win32-arm64-msvc": 2.0.7
+      "@llamaindex/liteparse-win32-x64-msvc": 2.0.7
+
   "@modelcontextprotocol/sdk@1.29.0(zod@3.25.76)":
     dependencies:
       "@hono/node-server": 1.19.14(hono@4.12.23)
@@ -3398,6 +3505,8 @@ snapshots:
       color-name: 1.1.4
 
   color-name@1.1.4: {}
+
+  commander@12.1.0: {}
 
   concat-map@0.0.1: {}
 

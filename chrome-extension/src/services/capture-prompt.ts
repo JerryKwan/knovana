@@ -12,7 +12,8 @@ export function generateKnowledgeEntryPrompt(options: KnowledgeEntryPromptOption
   return `请基于我上传、粘贴或补充的资料，整理一条完整的知识库条目。
 
 【资料处理】
-- 如果本次消息包含上传附件，请先使用 \`read_attachment\` 工具读取附件内容；读取时使用附件本地路径中 \`attachments/\` 后面的文件名作为参数。
+- 如果本次消息包含上传附件，请先使用 \`read_attachment\` 工具读取附件摘要预览；读取时使用附件本地路径中 \`attachments/\` 后面的文件名作为参数。
+- 读取上传文档附件时，后端会默认只解析前 3 页并限制返回字符数，用于摘要整理；不要要求 agent 绕过该限制做全文解析。
 - 如果附件是无法直接读取的二进制文件，请结合文件名、元数据和我在下方补充的说明整理。
 - 保存最终知识条目时，必须在 \`save_to_kb\` 的 attachments 参数中声明需要归档的附件；新建条目不要只把附件留在临时 \`attachments/\` 目录。
 - \`attachment_manager\` 的 \`import\` 动作主要用于给已经存在的知识条目补充附件。

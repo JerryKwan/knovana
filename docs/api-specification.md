@@ -89,7 +89,7 @@ data: 回复
 data: [DONE]
 ```
 
-当 `intent` 为 `knowledge_entry` 且请求包含 `attachment` 时，后端会把该附件纳入本次知识条目保存上下文；Agent 调用 `save_to_kb` 保存条目时，附件会被归档到条目目录的 `assets/` 中，并触发 `目录/index.md` 存储形式。普通 `chat` 意图下，附件仅作为当前消息的临时附件，除非用户或 Agent 明确执行归档操作。
+当 `intent` 为 `knowledge_entry` 且请求包含 `attachment` 时，后端会把该附件纳入本次知识条目保存上下文；Agent 调用 `save_to_kb` 保存条目时，附件会被归档到条目目录的 `assets/` 中，并触发 `目录/index.md` 存储形式。为了避免大文档占满 Agent 上下文，`read_attachment` 只向 Agent 暴露受限摘要预览：文本附件限制返回字符数，PDF/Office 等文档附件默认只解析前 3 页；原始附件文件仍会完整保存和归档。普通 `chat` 意图下，附件仅作为当前消息的临时附件，除非用户或 Agent 明确执行归档操作。
 
 ### GET /api/chat/sessions
 
@@ -173,11 +173,11 @@ data: [DONE]
 
 SSE 事件类型：
 
-| type | 说明 |
-|------|------|
-| `text` | AI 生成的文本片段 |
+| type     | 说明                                 |
+| -------- | ------------------------------------ |
+| `text`   | AI 生成的文本片段                    |
 | `action` | Agent 执行了某个操作（保存、搜索等） |
-| `error` | 处理错误 |
+| `error`  | 处理错误                             |
 
 ### POST /api/v1/attachments
 
@@ -402,11 +402,11 @@ file: <binary file data>
 
 常见错误码：
 
-| HTTP Status | Code | 说明 |
-|-------------|------|------|
-| 400 | `BAD_REQUEST` | 请求参数错误 |
-| 401 | `UNAUTHORIZED` | 未认证或 Token 过期 |
-| 403 | `FORBIDDEN` | 无权访问 |
-| 404 | `NOT_FOUND` | 资源不存在 |
-| 500 | `INTERNAL_ERROR` | 服务器内部错误 |
-| 503 | `AGENT_ERROR` | Claude Agent SDK TypeScript 处理失败 |
+| HTTP Status | Code             | 说明                                 |
+| ----------- | ---------------- | ------------------------------------ |
+| 400         | `BAD_REQUEST`    | 请求参数错误                         |
+| 401         | `UNAUTHORIZED`   | 未认证或 Token 过期                  |
+| 403         | `FORBIDDEN`      | 无权访问                             |
+| 404         | `NOT_FOUND`      | 资源不存在                           |
+| 500         | `INTERNAL_ERROR` | 服务器内部错误                       |
+| 503         | `AGENT_ERROR`    | Claude Agent SDK TypeScript 处理失败 |

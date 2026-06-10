@@ -7,13 +7,20 @@ const CHAT_INPUT_DRAFT_KEY = 'knovana.chatInputDraft';
 const localStore: Record<string, unknown> = {};
 const sendMessageMock = vi.fn();
 const fetchMock = vi.fn();
+type RuntimeListener = (message: unknown) => void;
+let runtimeListeners: RuntimeListener[] = [];
 
 function installChromeMock() {
+  runtimeListeners = [];
   vi.stubGlobal('chrome', {
     runtime: {
       onMessage: {
-        addListener: vi.fn(),
-        removeListener: vi.fn(),
+        addListener: vi.fn((listener: RuntimeListener) => {
+          runtimeListeners.push(listener);
+        }),
+        removeListener: vi.fn((listener: RuntimeListener) => {
+          runtimeListeners = runtimeListeners.filter((item) => item !== listener);
+        }),
       },
       sendMessage: sendMessageMock,
     },
@@ -76,6 +83,20 @@ function installRuntimeResponses() {
       return { ok: true, data: null };
     },
   );
+}
+
+function dispatchRuntimeMessage(message: unknown) {
+  for (const listener of runtimeListeners) {
+    listener(message);
+  }
+}
+
+function getStartChatRequestId(): string {
+  const call = sendMessageMock.mock.calls.find(
+    ([message]) => (message as { type?: string }).type === 'START_CHAT',
+  );
+  expect(call).toBeTruthy();
+  return (call![0] as { requestId: string }).requestId;
 }
 
 describe('Sidepanel App current chat session restore', () => {
@@ -213,6 +234,60 @@ describe('Sidepanel App current chat session restore', () => {
         }),
       ),
     );
+  });
+
+  it('replaces the API connection rail once assistant text tokens arrive', async () => {
+    render(App);
+
+    const input = (await screen.findByPlaceholderText('向 Knovana 提问…')) as HTMLTextAreaElement;
+    await fireEvent.input(input, { target: { value: '介绍一下 Knovana' } });
+    await fireEvent.click(screen.getByTitle('发送'));
+
+    await waitFor(() =>
+      expect(sendMessageMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'START_CHAT',
+        }),
+      ),
+    );
+    const requestId = getStartChatRequestId();
+
+    dispatchRuntimeMessage({
+      type: 'STREAM_EVENT',
+      payload: {
+        requestId,
+        stream: 'chat',
+        status: 'chunk',
+        pspEvent: {
+          type: 'status',
+          text: '正在连接 API...',
+          indicator: 'thinking',
+        },
+      },
+    });
+
+    expect(await screen.findByText('正在连接 API...')).toBeTruthy();
+
+    dispatchRuntimeMessage({
+      type: 'STREAM_EVENT',
+      payload: {
+        requestId,
+        stream: 'chat',
+        status: 'chunk',
+        pspEvent: {
+          type: 'content_block_delta',
+          index: 0,
+          delta: {
+            type: 'text_delta',
+            text: 'Knovana 正在生成回答。',
+          },
+        },
+      },
+    });
+
+    expect(await screen.findByText('Knovana 正在生成回答。')).toBeTruthy();
+    await waitFor(() => expect(screen.queryByText('正在连接 API...')).toBeNull());
+    expect(screen.getByText('正在生成回复...')).toBeTruthy();
   });
 
   it('keeps uploaded attachments when switching from composer to quick prompt', async () => {

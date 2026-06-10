@@ -51,6 +51,8 @@
 
   const surfaceId = crypto.randomUUID();
   const RUNTIME_STATE_MAX_AGE_MS = 30 * 60 * 1000;
+  const THINKING_STATUS_TEXT = '思考中...';
+  const GENERATING_STATUS_TEXT = '正在生成回复...';
 
   let activeTab: Tab = 'chat';
   let pendingAction: PendingAction | null = null;
@@ -88,6 +90,14 @@
     { id: 'knowledge', label: '知识库', icon: BookOpen },
     { id: 'history', label: '历史', icon: History },
   ];
+
+  function createGeneratingStatusRail(): NonNullable<ChatMessage['statusRail']> {
+    return { text: GENERATING_STATUS_TEXT, indicator: 'thinking' };
+  }
+
+  function createThinkingStatusRail(): NonNullable<ChatMessage['statusRail']> {
+    return { text: THINKING_STATUS_TEXT, indicator: 'thinking' };
+  }
 
   $: {
     runtimePersistSnapshot = runtimeHydrated
@@ -519,11 +529,13 @@
             type: 'text',
             text: '',
           };
+          statusRail = createGeneratingStatusRail();
         } else if (cbType === 'thinking') {
           blocks[idx] = {
             type: 'thinking',
             text: '',
           };
+          statusRail = createThinkingStatusRail();
         } else if (cbType === 'widget') {
           blocks[idx] = {
             type: 'widget',
@@ -549,8 +561,10 @@
         if (block) {
           if (block.type === 'text' && deltaType === 'text_delta') {
             block.text = (block.text || '') + (delta.text as string);
+            statusRail = createGeneratingStatusRail();
           } else if (block.type === 'thinking' && deltaType === 'thinking_delta') {
             block.text = (block.text || '') + (delta.text as string);
+            statusRail = createThinkingStatusRail();
           } else if (block.type === 'tool_call' && deltaType === 'input_json_delta') {
             block.partialJson = (block.partialJson || '') + (delta.partial_json as string);
             try {
@@ -558,6 +572,10 @@
             } catch {
               // incomplete JSON
             }
+            statusRail = {
+              text: block.name ? `正在执行工具 ${block.name}...` : '正在准备工具调用...',
+              indicator: 'tool',
+            };
           }
           blocks[idx] = block;
         }
@@ -585,11 +603,13 @@
             type: 'text',
             text: (cb.text as string) || '',
           };
+          statusRail = createGeneratingStatusRail();
         } else if (cbType === 'thinking') {
           blocks[idx] = {
             type: 'thinking',
             text: (cb.text as string) || '',
           };
+          statusRail = createThinkingStatusRail();
         } else if (cbType === 'widget') {
           blocks[idx] = {
             type: 'widget',
@@ -624,7 +644,11 @@
   function appendAssistantContent(content: string) {
     messages = messages.map((message) =>
       message.id === activeAssistantId
-        ? { ...message, content: `${message.content}${content}` }
+        ? {
+            ...message,
+            content: `${message.content}${content}`,
+            statusRail: content ? createGeneratingStatusRail() : message.statusRail,
+          }
         : message,
     );
   }

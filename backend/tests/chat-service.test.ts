@@ -274,6 +274,47 @@ describe("ChatService Tests", () => {
     expect(messages[1].content).toBe("Hello world");
   });
 
+  it("turns cleared SDK request status into a generating status", async () => {
+    const userId = "usr_test_stream_status_clear";
+    const sessionId = "sess_stream_status_clear";
+    insertUser(userId);
+
+    const { service } = createServiceWithSdkMessages(userId, [
+      systemStatus(sessionId, "requesting"),
+      systemStatus(sessionId, null),
+      streamEvent(sessionId, {
+        type: "message_start",
+        message: {
+          id: "sdk_msg_status_clear",
+          role: "assistant",
+          content: [],
+        },
+      }),
+      streamEvent(sessionId, {
+        type: "content_block_start",
+        index: 0,
+        content_block: { type: "text", text: "" },
+      }),
+      streamEvent(sessionId, {
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "text_delta", text: "Connected." },
+      }),
+      streamEvent(sessionId, {
+        type: "content_block_stop",
+        index: 0,
+      }),
+      assistantMessage(sessionId, [{ type: "text", text: "Connected." }]),
+    ]);
+
+    const chunks = await collectChunks(service.chat({ message: "hello" }));
+    const statusTexts = chunks
+      .filter((chunk) => chunk.event === "status")
+      .map((chunk) => chunk.data.text);
+
+    expect(statusTexts).toEqual(["正在连接 API...", "正在生成回复..."]);
+  });
+
   it("keeps streamed block mappings when SDK assistant snapshots arrive before block stops", async () => {
     const userId = "usr_test_snapshot_before_stop";
     const sessionId = "sess_snapshot_before_stop";
@@ -427,6 +468,11 @@ describe("ChatService Tests", () => {
     );
     expect(agent.chat).toHaveBeenCalledWith(
       expect.stringContaining("临时存储文件名: 研究报告.pdf"),
+      expect.any(String),
+      undefined,
+    );
+    expect(agent.chat).toHaveBeenCalledWith(
+      expect.stringContaining("只解析文档前 3 页"),
       expect.any(String),
       undefined,
     );
@@ -604,6 +650,19 @@ function streamEvent(sessionId: string, event: any): SDKMessage {
     event,
     parent_tool_use_id: null,
     uuid: randomUUIDForTest(event.type),
+    session_id: sessionId,
+  } as SDKMessage;
+}
+
+function systemStatus(
+  sessionId: string,
+  status: "requesting" | "compacting" | null,
+): SDKMessage {
+  return {
+    type: "system",
+    subtype: "status",
+    status,
+    uuid: randomUUIDForTest(`status_${status ?? "clear"}`),
     session_id: sessionId,
   } as SDKMessage;
 }

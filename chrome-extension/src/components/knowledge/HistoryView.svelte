@@ -10,26 +10,73 @@
     delete: { sessionId: string };
   }>();
 
-  let sessions: ChatSessionSummary[] = [];
-  let page = 1;
-  let loading = true;
-  let error = '';
+  const PAGE_SIZE = 20;
 
-  async function loadSessions(nextPage = 1) {
-    loading = true;
+  let sessions: ChatSessionSummary[] = [];
+  let total = 0;
+  let nextPageToLoad = 1;
+  let loading = true;
+  let loadingMore = false;
+  let error = '';
+  let hasMore = false;
+
+  $: hasMore = sessions.length < total;
+
+  async function loadSessions(nextPage = 1, mode: 'replace' | 'append' = 'replace') {
+    const append = mode === 'append';
+    if (append) {
+      loadingMore = true;
+    } else {
+      loading = true;
+    }
     error = '';
     try {
-      const response = await sendRuntimeMessage<{ sessions: ChatSessionSummary[]; total: number }>({
+      const response = await sendRuntimeMessage<{
+        sessions: ChatSessionSummary[];
+        total: number;
+        page?: number;
+      }>({
         type: 'GET_SESSIONS',
-        payload: { page: nextPage, per_page: 20 },
+        payload: { page: nextPage, per_page: PAGE_SIZE },
       });
-      sessions = response.sessions ?? [];
-      page = nextPage;
+      const incoming = response.sessions ?? [];
+      sessions = append ? mergeSessions(sessions, incoming) : incoming;
+      total = response.total ?? sessions.length;
+      nextPageToLoad = (response.page ?? nextPage) + 1;
     } catch (err) {
       error = err instanceof Error ? err.message : String(err);
     } finally {
-      loading = false;
+      if (append) {
+        loadingMore = false;
+      } else {
+        loading = false;
+      }
     }
+  }
+
+  function mergeSessions(
+    currentSessions: ChatSessionSummary[],
+    incomingSessions: ChatSessionSummary[],
+  ) {
+    return [
+      ...currentSessions,
+      ...incomingSessions.filter(
+        (session, index) =>
+          !currentSessions.some((current) => current.id === session.id) &&
+          incomingSessions.findIndex((incoming) => incoming.id === session.id) === index,
+      ),
+    ];
+  }
+
+  async function loadMoreSessions() {
+    if (loading || loadingMore || !hasMore) return;
+    await loadSessions(nextPageToLoad, 'append');
+  }
+
+  async function refreshSessions() {
+    deletingSessionId = null;
+    nextPageToLoad = 1;
+    await loadSessions(1);
   }
 
   let deletingSessionId: string | null = null;
@@ -52,8 +99,10 @@
         payload: { id },
       });
       dispatch('delete', { sessionId: id });
+      sessions = sessions.filter((session) => session.id !== id);
+      total = Math.max(0, total - 1);
+      nextPageToLoad = Math.max(1, Math.floor(sessions.length / PAGE_SIZE) + 1);
       deletingSessionId = null;
-      await loadSessions(page);
     } catch (err) {
       error = err instanceof Error ? err.message : String(err);
       deletingSessionId = null;
@@ -67,21 +116,54 @@
       const now = new Date();
       const diffMs = now.getTime() - d.getTime();
       const diffMins = Math.floor(diffMs / 60000);
-      const diffHours = Math.floor(diffMins / 60);
 
-      if (diffMins < 1) return '刚刚';
-      if (diffMins < 60) return `${diffMins}分钟前`;
-      if (diffHours < 24) {
-        // If same day
-        if (d.getDate() === now.getDate()) {
-          return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-        }
-        return '昨天';
+      if (diffMs >= 0 && diffMins < 1) return '刚刚';
+      if (diffMs >= 0 && diffMins < 60 && isSameLocalDay(d, now)) return `${diffMins}分钟前`;
+
+      const localTime = formatLocalTime(d);
+      if (isSameLocalDay(d, now)) {
+        return localTime;
       }
-      return `${d.getMonth() + 1}-${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+      if (isYesterday(d, now)) {
+        return `昨天 ${localTime}`;
+      }
+      if (d.getFullYear() === now.getFullYear()) {
+        return formatLocalDateTime(d, false);
+      }
+      return formatLocalDateTime(d, true);
     } catch {
       return dateStr;
     }
+  }
+
+  function isSameLocalDay(a: Date, b: Date): boolean {
+    return (
+      a.getFullYear() === b.getFullYear() &&
+      a.getMonth() === b.getMonth() &&
+      a.getDate() === b.getDate()
+    );
+  }
+
+  function isYesterday(date: Date, now: Date): boolean {
+    const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+    return isSameLocalDay(date, yesterday);
+  }
+
+  function formatLocalTime(date: Date): string {
+    return new Intl.DateTimeFormat(undefined, {
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(date);
+  }
+
+  function formatLocalDateTime(date: Date, includeYear: boolean): string {
+    return new Intl.DateTimeFormat(undefined, {
+      year: includeYear ? 'numeric' : undefined,
+      month: 'numeric',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(date);
   }
 
   onMount(() => {
@@ -97,7 +179,7 @@
       对话历史
     </div>
     <div class="flex gap-1">
-      <button type="button" class="toolbar-button" title="刷新" onclick={() => loadSessions(1)}>
+      <button type="button" class="toolbar-button" title="刷新" onclick={refreshSessions}>
         <RefreshCw size={14} class={loading ? 'animate-spin' : ''} />
       </button>
     </div>
@@ -184,6 +266,26 @@
                 {/if}
               </article>
             {/each}
+          </div>
+          <div class="list-footer">
+            {#if hasMore}
+              <button
+                type="button"
+                class="load-more-btn"
+                disabled={loading || loadingMore}
+                onclick={loadMoreSessions}
+              >
+                {#if loadingMore}
+                  <RefreshCw size={13} class="animate-spin" />
+                  <span>加载中...</span>
+                {:else}
+                  <Plus size={13} />
+                  <span>加载更多</span>
+                {/if}
+              </button>
+            {:else}
+              <span class="end-hint">已加载全部 {total} 条</span>
+            {/if}
           </div>
         {/if}
       {/if}
@@ -447,6 +549,49 @@
   .delete-btn:hover {
     background: color-mix(in srgb, var(--kn-danger) 10%, transparent);
     color: var(--kn-danger);
+  }
+
+  .list-footer {
+    display: grid;
+    place-items: center;
+    padding: 12px 0 2px;
+  }
+
+  .load-more-btn {
+    display: inline-flex;
+    min-height: 31px;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    border: 1px solid var(--kn-border);
+    border-radius: 8px;
+    background: var(--kn-field-bg);
+    color: var(--kn-text);
+    font-size: 12px;
+    font-weight: 700;
+    padding: 0 12px;
+    cursor: pointer;
+    transition:
+      background 150ms ease,
+      border-color 150ms ease,
+      color 150ms ease;
+  }
+
+  .load-more-btn:hover:not(:disabled) {
+    border-color: color-mix(in srgb, var(--kn-primary) 34%, var(--kn-border));
+    background: var(--kn-primary-soft);
+    color: var(--kn-primary);
+  }
+
+  .load-more-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.65;
+  }
+
+  .end-hint {
+    color: var(--kn-text-muted);
+    font-size: 11.5px;
+    font-weight: 600;
   }
 
   @keyframes shimmer {

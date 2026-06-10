@@ -647,7 +647,7 @@ export class ChatService {
 
     return `${base}\n\n【知识条目附件归档要求】:
 - 本次消息的目标是形成知识库条目，该附件必须作为最终知识条目的附件归档，不能只停留在临时 attachments 目录。
-- 请先使用 \`read_attachment\` 工具读取附件内容；读取参数使用临时存储文件名 \`${storedFilename}\`。
+- 请先使用 \`read_attachment\` 工具读取附件摘要预览；读取参数使用临时存储文件名 \`${storedFilename}\`。系统会默认只解析文档前 3 页并限制返回字符数，不要绕过该工具直接全文解析附件。
 - 调用 \`save_to_kb\` 保存条目时，必须在 attachments 参数中包含该附件：name 使用 \`${storedFilename}\`，description 优先使用原始文件名 \`${attachment.name}\`${attachment.size !== undefined ? `，size 使用 ${attachment.size}` : ""}。
 - 如果正文需要引用该附件，请先使用 \`attachments/${storedFilename}\`；保存工具会将其归档到条目目录下的 \`assets/\` 并改写为 \`assets/${storedFilename}\`。
 - 保存完成后，请在回复中告知最终知识条目的相对路径。`;
@@ -665,15 +665,39 @@ export class ChatService {
       };
     }
 
-    if (msg.subtype === "status" && msg.status === "requesting") {
-      return {
-        event: "status",
-        data: {
-          type: "status",
-          text: "正在连接 API...",
-          indicator: "thinking",
-        },
-      };
+    if (msg.subtype === "status") {
+      if (msg.status === "requesting") {
+        return {
+          event: "status",
+          data: {
+            type: "status",
+            text: "正在连接 API...",
+            indicator: "thinking",
+          },
+        };
+      }
+
+      if (msg.status === "compacting") {
+        return {
+          event: "status",
+          data: {
+            type: "status",
+            text: "正在压缩上下文...",
+            indicator: "loading",
+          },
+        };
+      }
+
+      if (msg.status === null) {
+        return {
+          event: "status",
+          data: {
+            type: "status",
+            text: "正在生成回复...",
+            indicator: "thinking",
+          },
+        };
+      }
     }
 
     if (msg.subtype === "api_retry") {

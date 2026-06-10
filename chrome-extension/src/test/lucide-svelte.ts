@@ -1,5 +1,6 @@
 import Icon from './LucideIconStub.svelte';
 
+export const ArrowLeft = Icon;
 export const BookOpen = Icon;
 export const Bot = Icon;
 export const Brain = Icon;
