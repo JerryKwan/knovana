@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { AttachmentManager } from "../../storage/knowledge/attachment";
 import { BadRequestError, AuthError } from "../../utils/errors";
+import { encodePathSegments } from "../../utils/filename";
 import { config } from "../../config";
 import type { AppEnv } from "../env";
 
@@ -38,11 +39,12 @@ const uploadRoute = createRoute({
           schema: z.object({
             url: z.string().openapi({
               description: "附件拉取 URL 地址",
-              example: "/api/v1/attachments/usr_123/img_20241201_143000.png",
+              example:
+                "/api/v1/attachments/usr_123/%E7%A0%94%E7%A9%B6%E6%8A%A5%E5%91%8A.pdf",
             }),
             filename: z.string().openapi({
               description: "保存至本地的文件名",
-              example: "img_20241201_143000.png",
+              example: "研究报告.pdf",
             }),
           }),
         },
@@ -65,7 +67,8 @@ const serveNoteAssetRoute = createRoute({
     params: z.object({
       noteAssetPath: z.string().openapi({
         description: "笔记的相对目录路径加上 assets/文件名",
-        example: "topics/ai/my-note-folder/assets/img_20241201_143000.png",
+        example:
+          "topics/ai/my-note-folder/assets/%E7%A0%94%E7%A9%B6%E6%8A%A5%E5%91%8A.pdf",
       }),
     }),
   },
@@ -90,7 +93,7 @@ const serveUserAttachmentRoute = createRoute({
     params: z.object({
       filename: z.string().openapi({
         description: "附件文件名",
-        example: "img_20241201_143000.png",
+        example: "研究报告.pdf",
       }),
     }),
   },
@@ -118,7 +121,7 @@ const serveAttachmentRoute = createRoute({
         .openapi({ description: "用户唯一标识", example: "usr_123" }),
       filename: z.string().openapi({
         description: "附件文件名",
-        example: "img_20241201_143000.png",
+        example: "研究报告.pdf",
       }),
     }),
   },
@@ -153,7 +156,7 @@ attachmentsRoutes.openapi(uploadRoute, async (c) => {
   // Return the relative endpoint that client can query
   return c.json(
     {
-      url: `/api/v1/attachments/${user.id}/${result.filename}`,
+      url: `/api/v1/attachments/${encodeURIComponent(user.id)}/${encodePathSegments(result.filename)}`,
       filename: result.filename,
     },
     200,

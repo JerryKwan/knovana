@@ -22,6 +22,7 @@ export interface ChatContext {
 export interface ChatRequestBody {
   message: string;
   session_id?: string;
+  intent?: 'chat' | 'knowledge_entry';
   attachment?: {
     name: string;
     size?: number;

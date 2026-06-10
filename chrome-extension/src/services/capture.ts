@@ -277,8 +277,8 @@ export async function downloadAndUploadAsset(
     if (!response.ok) throw new Error(`Fetch failed: ${response.status}`);
     const blob = await response.blob();
 
-    // Get original filename or extension from URL
-    let filename = url.split('/').pop()?.split('?')[0] || 'file';
+    // Keep the URL filename as a hint; the backend applies the final safety and conflict rules.
+    let filename = filenameFromUrl(url) || 'file';
     if (!filename.includes('.')) {
       const mime = blob.type;
       let ext = '.png';
@@ -291,9 +291,6 @@ export async function downloadAndUploadAsset(
       else if (mime === 'video/mp4') ext = '.mp4';
       else if (mime === 'video/webm') ext = '.webm';
       filename = `${filename}${ext}`;
-    } else {
-      // Clean filename
-      filename = filename.replace(/[^a-zA-Z0-9.\-_]/g, '');
     }
 
     const formData = new FormData();
@@ -317,5 +314,20 @@ export async function downloadAndUploadAsset(
   } catch (error) {
     console.error('Failed to download and upload asset:', url, error);
     return null;
+  }
+}
+
+function filenameFromUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    const leaf = parsed.pathname.split('/').pop() || '';
+    return decodeURIComponent(leaf).trim();
+  } catch {
+    const leaf = url.split('/').pop()?.split('?')[0] || '';
+    try {
+      return decodeURIComponent(leaf).trim();
+    } catch {
+      return leaf.trim();
+    }
   }
 }

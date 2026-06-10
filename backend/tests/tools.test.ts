@@ -1,9 +1,14 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { mkdir, rm, writeFile, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { createReadAttachmentTool } from "../src/agent/tools/read-attachment";
 import { createAttachmentManagerTool } from "../src/agent/tools/attachment-manager";
+import { createSaveToKbTool } from "../src/agent/tools/kb-save";
+import {
+  clearPendingKnowledgeAttachments,
+  setPendingKnowledgeAttachments,
+} from "../src/agent/tools/pending-attachments";
 import { KnowledgeFileOps } from "../src/storage/knowledge/file-ops";
 import { IndexManager } from "../src/storage/knowledge/index";
 import { config } from "../src/config";
@@ -126,6 +131,112 @@ describe("Agent Tools - read_attachment & attachment_manager import", () => {
       expect(entry.attachments![0].name).toBe(srcFilename);
       expect(entry.attachments![0].description).toBe("Test local doc import");
       expect(entry.attachments![0].size).toBe(attachmentContent.length);
+    });
+
+    it("should avoid overwriting existing note assets during import", async () => {
+      const noteEntry = {
+        id: "inbox/conflict-note/index.md",
+        title: "Conflict Note",
+        captured_at: new Date().toISOString(),
+        tags: [],
+        type: "note" as const,
+        attachments: [{ name: "doc.txt", description: "Existing doc" }],
+        content: "Note content here.",
+      };
+      await fileOps.saveEntry(noteEntry);
+      await indexMgr.addEntry(noteEntry);
+      await writeFile(
+        join(tempKbRoot, "inbox", "conflict-note", "assets", "doc.txt"),
+        "existing",
+        "utf8",
+      );
+      await writeFile(
+        join(tempKbRoot, "attachments", "doc.txt"),
+        "incoming",
+        "utf8",
+      );
+
+      const result = await (tool.handler as any)({
+        action: "import",
+        local_path: "attachments/doc.txt",
+        target_entry_id: "inbox/conflict-note/index.md",
+        description: "Incoming doc",
+      });
+
+      expect(result.isError).toBeUndefined();
+      expect(result.content[0].text).toContain("assets/doc-2.txt");
+      expect(
+        existsSync(
+          join(tempKbRoot, "inbox", "conflict-note", "assets", "doc.txt"),
+        ),
+      ).toBe(true);
+      expect(
+        existsSync(
+          join(tempKbRoot, "inbox", "conflict-note", "assets", "doc-2.txt"),
+        ),
+      ).toBe(true);
+
+      const entry = await fileOps.readEntry("inbox/conflict-note/index.md");
+      expect(entry.attachments?.map((att) => att.name).sort()).toEqual([
+        "doc-2.txt",
+        "doc.txt",
+      ]);
+    });
+  });
+
+  describe("save_to_kb tool", () => {
+    const tool = createSaveToKbTool(ctx);
+
+    it("should archive pending knowledge-entry attachments as note assets", async () => {
+      const filename = "研究报告.pdf";
+      const content = Buffer.from([1, 2, 3, 4, 5]);
+      await writeFile(join(tempKbRoot, "attachments", filename), content);
+      setPendingKnowledgeAttachments(ctx.userId, [
+        {
+          name: "原始研究报告.pdf",
+          size: content.length,
+          path: `attachments/${filename}`,
+        },
+      ]);
+
+      try {
+        const result = await (tool.handler as any)({
+          title: "Uploaded Report Knowledge Entry",
+          content: "这是一条根据上传附件整理的知识条目。",
+          tags: [],
+          category: "inbox",
+          attachments: [],
+        });
+
+        expect(result.isError).toBeUndefined();
+        const text = result.content[0].text as string;
+        const entryId = text.match(/文件相对路径为: (.+)$/)?.[1];
+        expect(entryId).toBeTruthy();
+        expect(entryId).toContain("/index.md");
+
+        const entry = await fileOps.readEntry(entryId!);
+        expect(entry.attachments).toEqual([
+          {
+            name: filename,
+            description: "原始研究报告.pdf",
+            size: content.length,
+          },
+        ]);
+        expect(
+          existsSync(
+            join(
+              dirname(fileOps.resolveEntryPath(entryId!)),
+              "assets",
+              filename,
+            ),
+          ),
+        ).toBe(true);
+        expect(existsSync(join(tempKbRoot, "attachments", filename))).toBe(
+          false,
+        );
+      } finally {
+        clearPendingKnowledgeAttachments(ctx.userId);
+      }
     });
   });
 });

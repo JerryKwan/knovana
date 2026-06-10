@@ -337,7 +337,7 @@
       if (pendingAction.customPrompt) {
         const prompt = pendingAction.customPrompt;
         clearCapture();
-        await sendChat(prompt);
+        await sendChat(prompt, undefined, 'knowledge_entry');
         return;
       }
 
@@ -390,7 +390,7 @@
 
       if (prompt) {
         clearCapture();
-        await sendChat(prompt);
+        await sendChat(prompt, undefined, 'knowledge_entry');
       }
     } catch (err) {
       captureError = err instanceof Error ? err.message : String(err);
@@ -398,7 +398,11 @@
     }
   }
 
-  async function sendChat(message: string, attachment?: ChatAttachment) {
+  async function sendChat(
+    message: string,
+    attachment?: ChatAttachment,
+    intent: 'chat' | 'knowledge_entry' = 'chat',
+  ) {
     const userMessage: ChatMessage = {
       id: crypto.randomUUID(),
       role: 'user',
@@ -427,6 +431,7 @@
       payload: {
         message: message,
         session_id: currentSessionId,
+        intent,
         attachment,
       },
     });
@@ -704,7 +709,7 @@
     try {
       activeQuickAction = null;
       composerAttachment = null;
-      await sendChat(prompt, attachment);
+      await sendChat(prompt, attachment, 'knowledge_entry');
     } catch (err) {
       activeQuickAction = actionSnapshot;
       composerAttachment = attachment ?? null;

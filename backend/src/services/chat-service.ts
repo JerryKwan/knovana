@@ -6,7 +6,12 @@ import { KnovanaAgent } from "../agent/client";
 import { SessionWarmPool } from "../agent/pool";
 import { SYSTEM_PROMPT } from "../agent/prompts/system-prompt";
 import { KnovanaSessionStore } from "../agent/session-store";
+import {
+  clearPendingKnowledgeAttachments,
+  setPendingKnowledgeAttachments,
+} from "../agent/tools/pending-attachments";
 import { config } from "../config";
+import { extractAttachmentFilename } from "../utils/filename";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import type {
   ChatSession,
@@ -17,6 +22,7 @@ import type {
 export interface ChatInput {
   message: string;
   session_id?: string;
+  intent?: "chat" | "knowledge_entry";
   attachment?: {
     name: string;
     size?: number;
@@ -86,34 +92,48 @@ export class ChatService {
       }
     }
 
+    const intent = input.intent ?? "chat";
+
     if (shouldResume && sessionId) {
       this.ensureSessionForUserMessage(
         sessionId,
         input.message,
         "New Web Capture",
-        input.attachment ? { attachment: input.attachment } : undefined,
+        input.attachment ? { attachment: input.attachment, intent } : undefined,
       );
     }
 
     const agentPrompt = input.attachment
-      ? `${input.message}\n\n---\n【用户上传的附件文件】:\n- 文件名: ${input.attachment.name}\n- 本地路径: ${input.attachment.path}\n\n提示: 你可以使用 \`read_attachment\` 工具读取该附件内容。若要将此文件归档/绑定到具体的知识笔记中，请使用 \`attachment_manager\` 工具的 \`import\` 动作。`
+      ? this.buildAttachmentPrompt(input.message, input.attachment, intent)
       : input.message;
 
-    const agent = this.agentFactory(this.userId, this.kbRoot);
-    const sdkStream = agent.chat(
-      agentPrompt,
-      SYSTEM_PROMPT,
-      shouldResume ? sessionId : undefined,
-    );
+    const shouldTrackKnowledgeAttachment =
+      intent === "knowledge_entry" && input.attachment !== undefined;
+    if (shouldTrackKnowledgeAttachment && input.attachment) {
+      setPendingKnowledgeAttachments(this.userId, [input.attachment]);
+    }
 
-    yield* this.streamAgentResponse({
-      sdkStream,
-      userMessage: input.message,
-      sessionId,
-      dbInitialized: shouldResume,
-      emitSessionCreated: !shouldResume,
-      attachment: input.attachment,
-    });
+    try {
+      const agent = this.agentFactory(this.userId, this.kbRoot);
+      const sdkStream = agent.chat(
+        agentPrompt,
+        SYSTEM_PROMPT,
+        shouldResume ? sessionId : undefined,
+      );
+
+      yield* this.streamAgentResponse({
+        sdkStream,
+        userMessage: input.message,
+        sessionId,
+        dbInitialized: shouldResume,
+        emitSessionCreated: !shouldResume,
+        attachment: input.attachment,
+      });
+    } finally {
+      if (shouldTrackKnowledgeAttachment) {
+        clearPendingKnowledgeAttachments(this.userId);
+      }
+    }
   }
 
   createSession(title?: string, context?: any): ChatSession {
@@ -606,6 +626,31 @@ export class ChatService {
     }
 
     this.messageRepo.create(sessionId, "user", message, metadata);
+  }
+
+  private buildAttachmentPrompt(
+    message: string,
+    attachment: NonNullable<ChatInput["attachment"]>,
+    intent: "chat" | "knowledge_entry",
+  ): string {
+    const storedFilename =
+      extractAttachmentFilename(attachment.path) || attachment.path;
+    const sizeLine =
+      attachment.size !== undefined
+        ? `\n- 文件大小: ${attachment.size} 字节`
+        : "";
+    const base = `${message}\n\n---\n【用户上传的附件文件】:\n- 原始文件名: ${attachment.name}\n- 临时存储文件名: ${storedFilename}\n- 本地路径: ${attachment.path}${sizeLine}`;
+
+    if (intent !== "knowledge_entry") {
+      return `${base}\n\n提示: 你可以使用 \`read_attachment\` 工具读取该附件内容。若要将此文件归档/绑定到具体的知识笔记中，请使用 \`attachment_manager\` 工具的 \`import\` 动作。`;
+    }
+
+    return `${base}\n\n【知识条目附件归档要求】:
+- 本次消息的目标是形成知识库条目，该附件必须作为最终知识条目的附件归档，不能只停留在临时 attachments 目录。
+- 请先使用 \`read_attachment\` 工具读取附件内容；读取参数使用临时存储文件名 \`${storedFilename}\`。
+- 调用 \`save_to_kb\` 保存条目时，必须在 attachments 参数中包含该附件：name 使用 \`${storedFilename}\`，description 优先使用原始文件名 \`${attachment.name}\`${attachment.size !== undefined ? `，size 使用 ${attachment.size}` : ""}。
+- 如果正文需要引用该附件，请先使用 \`attachments/${storedFilename}\`；保存工具会将其归档到条目目录下的 \`assets/\` 并改写为 \`assets/${storedFilename}\`。
+- 保存完成后，请在回复中告知最终知识条目的相对路径。`;
   }
 
   private toStatusChunk(msg: any): PspChunk | null {

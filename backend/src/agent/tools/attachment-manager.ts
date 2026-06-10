@@ -1,12 +1,21 @@
 import { tool } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import { dirname, join, basename } from "node:path";
-import { mkdir, writeFile, copyFile, stat } from "node:fs/promises";
+import { mkdir, stat } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import type { ToolContext } from "./index";
 import { KnowledgeFileOps } from "../../storage/knowledge/file-ops";
 import { IndexManager } from "../../storage/knowledge/index";
 import { getISOStringWithOffset } from "../../utils/datetime";
+import {
+  copyFileUnique,
+  encodePathSegments,
+  extractAttachmentFilename,
+  filenameFromContentDisposition,
+  inferExtensionFromContentType,
+  sanitizeAttachmentFilename,
+  writeUniqueFile,
+} from "../../utils/filename";
 import type { KnowledgeAttachment } from "../../models/knowledge";
 
 export function createAttachmentManagerTool(ctx: ToolContext) {
@@ -76,7 +85,20 @@ export function createAttachmentManagerTool(ctx: ToolContext) {
             };
           }
 
-          const srcPath = join(ctx.kbRoot, args.local_path);
+          const sourceFilename = extractAttachmentFilename(args.local_path);
+          if (!sourceFilename) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: "text",
+                  text: `错误: 非法的本地附件路径 "${args.local_path}"。`,
+                },
+              ],
+            };
+          }
+
+          const srcPath = join(ctx.kbRoot, "attachments", sourceFilename);
           if (!existsSync(srcPath)) {
             return {
               isError: true,
@@ -111,14 +133,15 @@ export function createAttachmentManagerTool(ctx: ToolContext) {
           const assetsDir = join(dirname(targetFilePath), "assets");
           await mkdir(assetsDir, { recursive: true });
 
-          const filename = basename(srcPath);
-          const assetDiskPath = join(assetsDir, filename);
-
-          // Copy source file to note assets folder
-          await copyFile(srcPath, assetDiskPath);
+          const copied = await copyFileUnique(
+            srcPath,
+            assetsDir,
+            sourceFilename,
+          );
+          const filename = copied.filename;
 
           // Get file stat for size
-          const fileStat = await stat(assetDiskPath);
+          const fileStat = await stat(copied.path);
 
           const newAttachment: KnowledgeAttachment = {
             name: filename,
@@ -136,14 +159,15 @@ export function createAttachmentManagerTool(ctx: ToolContext) {
           await fileOps.saveEntry(entry);
           await indexMgr.addEntry(entry);
 
+          const assetRef = `assets/${encodePathSegments(filename)}`;
           return {
             content: [
               {
                 type: "text",
                 text: `附件 "${filename}" 成功导入并保存至 ${assetsDir}。
-本地相对引用路径为: assets/${filename}。
+本地相对引用路径为: ${assetRef}。
 此条目已升级/更新为文件夹格式: ${finalEntryId}。
-请务必在 Markdown 正文中使用 ![描述](assets/${filename}) 来引用该附件。`,
+请务必在 Markdown 正文中使用 ![描述](${assetRef}) 来引用该附件。`,
               },
             ],
           };
@@ -172,25 +196,17 @@ export function createAttachmentManagerTool(ctx: ToolContext) {
 
         // Determine filename
         const urlObj = new URL(args.url);
-        const pathname = urlObj.pathname;
-        let filename = basename(pathname);
-        if (!filename || !filename.includes(".")) {
-          const contentType = response.headers.get("Content-Type") || "";
-          let ext = ".png";
-          if (
-            contentType.includes("image/jpeg") ||
-            contentType.includes("image/jpg")
-          )
-            ext = ".jpg";
-          else if (contentType.includes("image/gif")) ext = ".gif";
-          else if (contentType.includes("image/webp")) ext = ".webp";
-          else if (contentType.includes("application/pdf")) ext = ".pdf";
-
-          filename = `attachment_${Date.now()}${ext}`;
-        } else {
-          // Clean filename
-          filename = filename.replace(/[^a-zA-Z0-9.\-_]/g, "");
-        }
+        const urlFilename = decodeFilenameFromUrlPath(urlObj.pathname);
+        const contentType = response.headers.get("Content-Type") || "";
+        const fallbackExt = inferExtensionFromContentType(contentType);
+        const filename = sanitizeAttachmentFilename(
+          filenameFromContentDisposition(
+            response.headers.get("Content-Disposition"),
+          ) ||
+            urlFilename ||
+            "attachment",
+          { fallbackBase: "attachment", fallbackExt },
+        );
 
         // If not folder-based note, convert it!
         let finalEntryId = entryId;
@@ -214,13 +230,13 @@ export function createAttachmentManagerTool(ctx: ToolContext) {
         const assetsDir = join(dirname(targetFilePath), "assets");
         await mkdir(assetsDir, { recursive: true });
 
-        const assetDiskPath = join(assetsDir, filename);
-        await writeFile(assetDiskPath, buffer);
+        const written = await writeUniqueFile(assetsDir, filename, buffer);
+        const finalFilename = written.filename;
 
         // Update frontmatter attachments meta
         const newAttachment: KnowledgeAttachment = {
-          name: filename,
-          description: args.description || filename,
+          name: finalFilename,
+          description: args.description || finalFilename,
           size: buffer.length,
           mime_type: response.headers.get("Content-Type") || undefined,
         };
@@ -228,7 +244,7 @@ export function createAttachmentManagerTool(ctx: ToolContext) {
         entry.attachments = entry.attachments || [];
         // Prevent duplicate attachment listing
         entry.attachments = entry.attachments.filter(
-          (a) => a.name !== filename,
+          (a) => a.name !== finalFilename,
         );
         entry.attachments.push(newAttachment);
         entry.updated_at = getISOStringWithOffset();
@@ -237,14 +253,15 @@ export function createAttachmentManagerTool(ctx: ToolContext) {
         await fileOps.saveEntry(entry);
         await indexMgr.addEntry(entry);
 
+        const assetRef = `assets/${encodePathSegments(finalFilename)}`;
         return {
           content: [
             {
               type: "text",
               text: `附件成功保存至 ${assetsDir}。
-下载后的相对引用路径为: assets/${filename}。
+下载后的相对引用路径为: ${assetRef}。
 此条目已升级/更新为文件夹格式: ${finalEntryId}。
-请务必在 Markdown 正文中使用 ![描述](assets/${filename}) 来引用下载好的文件。`,
+请务必在 Markdown 正文中使用 ![描述](${assetRef}) 来引用下载好的文件。`,
             },
           ],
         };
@@ -261,4 +278,15 @@ export function createAttachmentManagerTool(ctx: ToolContext) {
       }
     },
   );
+}
+
+function decodeFilenameFromUrlPath(pathname: string): string {
+  const rawName = basename(pathname);
+  if (!rawName) return "";
+
+  try {
+    return decodeURIComponent(rawName);
+  } catch {
+    return rawName;
+  }
 }

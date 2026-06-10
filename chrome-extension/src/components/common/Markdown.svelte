@@ -39,22 +39,23 @@
       let src = href;
       if (href) {
         if (href.startsWith('attachments/')) {
-          const filename = href.slice('attachments/'.length);
+          const filename = decodePath(href.slice('attachments/'.length));
+          const encodedFilename = encodePath(filename);
           if (uid) {
-            src = `${url}/attachments/${uid}/${filename}`;
+            src = `${url}/attachments/${encodeURIComponent(uid)}/${encodedFilename}`;
           } else {
-            src = `${url}/attachments/file/${filename}`;
+            src = `${url}/attachments/file/${encodedFilename}`;
           }
           if (tok) {
             src += `?token=${encodeURIComponent(tok)}`;
           }
         } else if (href.startsWith('assets/')) {
-          const filename = href.slice('assets/'.length);
+          const filename = decodePath(href.slice('assets/'.length));
           if (nid) {
             const parts = nid.split('/');
             parts.pop(); // Remove index.md or filename
-            const notePath = parts.join('/');
-            src = `${url}/attachments/notes/${notePath}/assets/${filename}`;
+            const notePath = encodePath(parts.join('/'));
+            src = `${url}/attachments/notes/${notePath}/assets/${encodePath(filename)}`;
             if (tok) {
               src += `?token=${encodeURIComponent(tok)}`;
             }
@@ -70,6 +71,18 @@
   }
 
   $: html = parseMarkdown(content, noteId, backendUrl, token, userId);
+
+  function encodePath(path: string): string {
+    return path.split('/').map(encodeURIComponent).join('/');
+  }
+
+  function decodePath(path: string): string {
+    try {
+      return decodeURIComponent(path);
+    } catch {
+      return path;
+    }
+  }
 </script>
 
 <div class="markdown max-w-none text-[13px] leading-6 text-[color:var(--kn-text)]">

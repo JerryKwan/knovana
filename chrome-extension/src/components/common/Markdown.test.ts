@@ -41,4 +41,16 @@ describe('Markdown', () => {
     expect(codeBlock?.textContent).toContain('const ok = true;');
     expect(codeBlock?.parentElement?.tagName).toBe('PRE');
   });
+
+  it('encodes attachment filenames in rendered image URLs', () => {
+    const { container } = render(Markdown, {
+      props: {
+        content: '![报告](attachments/%E7%A0%94%E7%A9%B6%20%E6%8A%A5%E5%91%8A.pdf)',
+      },
+    });
+
+    expect(container.querySelector('img')?.getAttribute('src')).toContain(
+      'attachments/file/%E7%A0%94%E7%A9%B6%20%E6%8A%A5%E5%91%8A.pdf',
+    );
+  });
 });

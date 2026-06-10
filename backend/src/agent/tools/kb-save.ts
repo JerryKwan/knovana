@@ -1,13 +1,19 @@
 import { tool } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
-import { rename, mkdir } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { ToolContext } from "./index";
+import { getPendingKnowledgeAttachments } from "./pending-attachments";
 import { KnowledgeFileOps } from "../../storage/knowledge/file-ops";
 import { IndexManager } from "../../storage/knowledge/index";
 import { generateSlug } from "../../utils/slug";
 import { getISOStringWithOffset } from "../../utils/datetime";
+import {
+  encodePathSegments,
+  extractAttachmentFilename,
+  moveFileUnique,
+} from "../../utils/filename";
 import type { KnowledgeEntry } from "../../models/knowledge";
 
 export function createSaveToKbTool(ctx: ToolContext) {
@@ -53,10 +59,13 @@ export function createSaveToKbTool(ctx: ToolContext) {
 
       // Automatically detect attachments in content that might not be declared in args.attachments
       const detectedAttachments = new Set<string>();
-      const attachmentRegex = /attachments\/([a-zA-Z0-9_\-.]+)/g;
+      const attachmentRegex = /attachments\/([^)\]\n\r"'<>]+)/g;
       let match;
       while ((match = attachmentRegex.exec(args.content)) !== null) {
-        detectedAttachments.add(match[1]);
+        const filename = decodeAttachmentName(match[1].trim());
+        if (filename) {
+          detectedAttachments.add(filename);
+        }
       }
 
       // Add detected attachments to args.attachments if they are not already there
@@ -69,7 +78,23 @@ export function createSaveToKbTool(ctx: ToolContext) {
             name,
             description: "Auto-detected attachment",
           });
+          existingAttachmentNames.add(name);
         }
+      }
+
+      for (const pending of getPendingKnowledgeAttachments(ctx.userId)) {
+        const filename = extractAttachmentFilename(pending.path);
+        if (!filename || existingAttachmentNames.has(filename)) continue;
+
+        const sourcePath = join(ctx.kbRoot, "attachments", filename);
+        if (!existsSync(sourcePath)) continue;
+
+        args.attachments.push({
+          name: filename,
+          description: pending.name || filename,
+          size: pending.size,
+        });
+        existingAttachmentNames.add(filename);
       }
 
       const slug = generateSlug(args.title);
@@ -100,18 +125,28 @@ export function createSaveToKbTool(ctx: ToolContext) {
         await mkdir(assetsDir, { recursive: true });
 
         const globalAttachmentsDir = join(ctx.kbRoot, "attachments");
+        const finalAttachments: typeof args.attachments = [];
         for (const att of args.attachments) {
           const sourcePath = join(globalAttachmentsDir, att.name);
-          const destPath = join(assetsDir, att.name);
+          let finalName = att.name;
           if (existsSync(sourcePath)) {
-            await rename(sourcePath, destPath);
+            const moved = await moveFileUnique(sourcePath, assetsDir, att.name);
+            finalName = moved.filename;
           }
+
+          const finalAssetRef = `assets/${encodePathSegments(finalName)}`;
           // Rewrite content references: replace "attachments/filename" with "assets/filename"
           entryContent = entryContent.replaceAll(
             `attachments/${att.name}`,
-            `assets/${att.name}`,
+            finalAssetRef,
           );
+          entryContent = entryContent.replaceAll(
+            `attachments/${encodeURIComponent(att.name)}`,
+            finalAssetRef,
+          );
+          finalAttachments.push({ ...att, name: finalName });
         }
+        args.attachments = finalAttachments;
       }
 
       const entry: KnowledgeEntry = {
@@ -138,4 +173,12 @@ export function createSaveToKbTool(ctx: ToolContext) {
       };
     },
   );
+}
+
+function decodeAttachmentName(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
 }

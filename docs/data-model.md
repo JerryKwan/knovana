@@ -51,6 +51,12 @@ knowledge-base/{user_id}/
 - slug 从标题生成：小写、去除特殊字符、空格转连字符
 - 示例：`2024-12-01-react-server-components.md`
 
+**附件命名规则**：
+- 上传或下载附件时，系统尽量保留原始文件名的主体和扩展名，例如 `研究报告.pdf`。
+- 为保证文件系统安全，路径片段、控制字符、Windows 非法字符和 Markdown 链接分隔符会被净化。
+- 同一目录中出现同名附件时，使用简洁数字后缀避免覆盖，例如 `研究报告.pdf`、`研究报告-2.pdf`。
+- frontmatter 的 `attachments[].name` 记录实际磁盘文件名；Markdown 正文中的 `assets/...` 引用在包含空格、中文等字符时可以使用 URL 编码形式，例如 `assets/%E7%A0%94%E7%A9%B6%20%E6%8A%A5%E5%91%8A.pdf`。
+
 ---
 
 ## 2. Markdown 文件格式
@@ -166,7 +172,7 @@ attachments:
 
 ```yaml
 attachments:
-  - name: filename.png        # 文件名
+  - name: filename.png        # 实际附件文件名，尽量保留原始名称
     description: 图片说明       # 描述
     size: 245000               # 字节数
     mime_type: image/png       # MIME 类型（可选）

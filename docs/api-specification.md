@@ -65,6 +65,12 @@ Chrome 扩展与后端之间的 HTTP API 规范。
 {
   "message": "帮我总结一下这段内容",
   "session_id": "sess_xyz",           // 可选，不传则创建新会话
+  "intent": "chat",                   // 可选：chat | knowledge_entry
+  "attachment": {                     // 可选，用户上传附件
+    "name": "研究报告.pdf",            // 原始展示文件名
+    "size": 245000,
+    "path": "attachments/研究报告.pdf" // 后端临时附件路径
+  },
   "context": {                        // 可选，页面上下文
     "page_url": "https://example.com/article",
     "page_title": "Some Article",
@@ -82,6 +88,8 @@ data: 流式
 data: 回复
 data: [DONE]
 ```
+
+当 `intent` 为 `knowledge_entry` 且请求包含 `attachment` 时，后端会把该附件纳入本次知识条目保存上下文；Agent 调用 `save_to_kb` 保存条目时，附件会被归档到条目目录的 `assets/` 中，并触发 `目录/index.md` 存储形式。普通 `chat` 意图下，附件仅作为当前消息的临时附件，除非用户或 Agent 明确执行归档操作。
 
 ### GET /api/chat/sessions
 
@@ -171,18 +179,18 @@ SSE 事件类型：
 | `action` | Agent 执行了某个操作（保存、搜索等） |
 | `error` | 处理错误 |
 
-### POST /api/capture/image
+### POST /api/v1/attachments
 
-上传图片附件。
+上传图片或文件附件。后端尽量保留原始文件名；若同一临时附件目录下已存在同名文件，则追加简洁数字后缀，例如 `研究报告.pdf`、`研究报告-2.pdf`。文件名中的路径片段、控制字符和 Windows/Markdown 不安全字符会被净化。
 
 ```
 // Request: multipart/form-data
-file: <binary image data>
+file: <binary file data>
 
 // Response 200
 {
-  "url": "/attachments/usr_abc123/img_20241201_143000.png",
-  "filename": "img_20241201_143000.png"
+  "url": "/api/v1/attachments/usr_abc123/%E7%A0%94%E7%A9%B6%E6%8A%A5%E5%91%8A.pdf",
+  "filename": "研究报告.pdf"
 }
 ```
 

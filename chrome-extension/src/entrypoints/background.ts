@@ -282,9 +282,6 @@ async function handleRuntimeMessage(
       return okResponse(null);
 
     case 'CAPTURE_SUBMIT': {
-      const tab = sender.tab;
-      if (!tab || tab.windowId === undefined) return okResponse(null);
-
       const { prompt, action, context } = message.payload;
       const pending: PendingAction = {
         id: crypto.randomUUID(),
@@ -296,9 +293,14 @@ async function handleRuntimeMessage(
       };
 
       await savePendingAction(pending);
-      const openedSurfaceId = await openPreferredSurface(tab.windowId);
+      const sourceWindowId = sender.tab?.windowId;
+      if (sourceWindowId !== undefined) {
+        rememberBrowserWindow(sourceWindowId);
+      }
+      const targetWindowId = await getBrowserWindowId(sourceWindowId);
+      const openedSurfaceId = await openPreferredSurface(targetWindowId);
       await broadcastPendingAction(pending, openedSurfaceId ?? getActiveSurface()?.surfaceId);
-      return okResponse(null);
+      return okResponse({ queued: true });
     }
 
     case 'CAPTURE_CANCEL':
@@ -1108,6 +1110,7 @@ function injectCaptureOverlay(
   brand.appendChild(logoText);
 
   const closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
   closeBtn.className = 'close-btn';
   closeBtn.innerHTML =
     '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
@@ -1148,10 +1151,12 @@ function injectCaptureOverlay(
   footer.className = 'footer';
 
   const btnCancel = document.createElement('button');
+  btnCancel.type = 'button';
   btnCancel.className = 'btn btn-cancel';
   btnCancel.textContent = '取消';
 
   const btnSend = document.createElement('button');
+  btnSend.type = 'button';
   btnSend.className = 'btn btn-send';
   btnSend.textContent = '发送并整理';
 
@@ -1234,29 +1239,68 @@ function injectCaptureOverlay(
     backdrop.classList.add('visible');
   });
 
-  function closeOverlay(submit = false, finalPrompt = '') {
+  function removeOverlay() {
     backdrop.classList.remove('visible');
     card.style.transform = 'scale(0.95) translateY(10px)';
-
-    if (submit) {
-      chrome.runtime.sendMessage({
-        type: 'CAPTURE_SUBMIT',
-        payload: { prompt: finalPrompt, action, context },
-      });
-    } else {
-      chrome.runtime.sendMessage({
-        type: 'CAPTURE_CANCEL',
-      });
-    }
 
     setTimeout(() => {
       host.remove();
     }, 250);
   }
 
-  closeBtn.addEventListener('click', () => closeOverlay(false));
-  btnCancel.addEventListener('click', () => closeOverlay(false));
-  btnSend.addEventListener('click', () => closeOverlay(true, textarea.value));
+  function closeOverlay() {
+    chrome.runtime.sendMessage({
+      type: 'CAPTURE_CANCEL',
+    });
+    removeOverlay();
+  }
+
+  async function submitOverlay(finalPrompt: string) {
+    const originalText = btnSend.textContent || '发送并整理';
+    btnSend.disabled = true;
+    btnSend.textContent = '发送中...';
+
+    try {
+      await sendOverlayMessage({
+        type: 'CAPTURE_SUBMIT',
+        payload: { prompt: finalPrompt, action, context },
+      });
+      removeOverlay();
+    } catch (error) {
+      btnSend.disabled = false;
+      btnSend.textContent = originalText;
+      window.alert(`发送失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  function sendOverlayMessage(message: unknown): Promise<unknown> {
+    return new Promise((resolve, reject) => {
+      try {
+        chrome.runtime.sendMessage(message, (response) => {
+          const lastError = chrome.runtime.lastError;
+          if (lastError) {
+            reject(new Error(lastError.message));
+            return;
+          }
+
+          if (!response?.ok) {
+            reject(new Error(response?.error ?? 'Knovana background service did not respond.'));
+            return;
+          }
+
+          resolve(response.data);
+        });
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }
+
+  closeBtn.addEventListener('click', () => closeOverlay());
+  btnCancel.addEventListener('click', () => closeOverlay());
+  btnSend.addEventListener('click', () => {
+    void submitOverlay(textarea.value);
+  });
 
   let isMouseDownOnBackdrop = false;
   backdrop.addEventListener('mousedown', (e) => {
@@ -1265,13 +1309,13 @@ function injectCaptureOverlay(
 
   backdrop.addEventListener('click', (e) => {
     if (e.target === backdrop && isMouseDownOnBackdrop) {
-      closeOverlay(false);
+      closeOverlay();
     }
   });
 
   const handleKeyDown = (e: KeyboardEvent) => {
     if (e.key === 'Escape') {
-      closeOverlay(false);
+      closeOverlay();
       window.removeEventListener('keydown', handleKeyDown);
     }
   };

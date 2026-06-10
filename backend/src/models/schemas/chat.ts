@@ -9,6 +9,11 @@ export const ChatRequestSchema = z.object({
     description: "历史会话 ID，如果不传则后端会自动创建并分配一个新会话",
     example: "sess_1234567890ab",
   }),
+  intent: z.enum(["chat", "knowledge_entry"]).optional().openapi({
+    description:
+      "本次消息意图。knowledge_entry 表示应将上传附件作为知识条目附件归档。",
+    example: "knowledge_entry",
+  }),
   attachment: z
     .object({
       name: z.string().openapi({ description: "附件文件名" }),

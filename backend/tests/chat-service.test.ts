@@ -3,6 +3,7 @@ import { getDatabase } from "../src/storage/database";
 import { runMigrations } from "../src/storage/migrations";
 import { ChatService } from "../src/services/chat-service";
 import { config } from "../src/config";
+import { getPendingKnowledgeAttachments } from "../src/agent/tools/pending-attachments";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 
 type PspTestChunk = { event: string; data: any };
@@ -396,6 +397,40 @@ describe("ChatService Tests", () => {
 
     const messages = getStoredMessages(sessionId);
     expect(messages[1].content).toBe("Fallback answer");
+  });
+
+  it("adds archival instructions for knowledge-entry attachments", async () => {
+    const userId = "usr_test_knowledge_attachment";
+    const sessionId = "sess_knowledge_attachment";
+    insertUser(userId);
+
+    const { service, agent } = createServiceWithSdkMessages(userId, [
+      assistantMessage(sessionId, [{ type: "text", text: "Saved" }]),
+    ]);
+
+    await collectChunks(
+      service.chat({
+        message: "请整理附件为知识条目",
+        intent: "knowledge_entry",
+        attachment: {
+          name: "原始研究报告.pdf",
+          size: 12,
+          path: "attachments/研究报告.pdf",
+        },
+      }),
+    );
+
+    expect(agent.chat).toHaveBeenCalledWith(
+      expect.stringContaining("【知识条目附件归档要求】"),
+      expect.any(String),
+      undefined,
+    );
+    expect(agent.chat).toHaveBeenCalledWith(
+      expect.stringContaining("临时存储文件名: 研究报告.pdf"),
+      expect.any(String),
+      undefined,
+    );
+    expect(getPendingKnowledgeAttachments(userId)).toEqual([]);
   });
 
   it("keeps PSP block indexes globally ordered across tool calls and follow-up assistant messages", async () => {

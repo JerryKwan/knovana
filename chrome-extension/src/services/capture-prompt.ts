@@ -14,7 +14,8 @@ export function generateKnowledgeEntryPrompt(options: KnowledgeEntryPromptOption
 【资料处理】
 - 如果本次消息包含上传附件，请先使用 \`read_attachment\` 工具读取附件内容；读取时使用附件本地路径中 \`attachments/\` 后面的文件名作为参数。
 - 如果附件是无法直接读取的二进制文件，请结合文件名、元数据和我在下方补充的说明整理。
-- 如果需要把附件绑定到最终知识条目，请使用 \`attachment_manager\` 工具的 \`import\` 动作。
+- 保存最终知识条目时，必须在 \`save_to_kb\` 的 attachments 参数中声明需要归档的附件；新建条目不要只把附件留在临时 \`attachments/\` 目录。
+- \`attachment_manager\` 的 \`import\` 动作主要用于给已经存在的知识条目补充附件。
 
 【我补充的重点或原始内容】
 """

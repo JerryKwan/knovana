@@ -167,6 +167,48 @@ describe('Sidepanel App current chat session restore', () => {
           type: 'START_CHAT',
           payload: expect.objectContaining({
             message: '整理这份资料并保存。',
+            intent: 'knowledge_entry',
+          }),
+        }),
+      ),
+    );
+  });
+
+  it('runs pending capture prompts from the context-menu overlay in chat', async () => {
+    sendMessageMock.mockImplementation(
+      async (message: { type: string; payload?: Record<string, unknown> }) => {
+        if (message.type === 'CONSUME_PENDING_ACTION') {
+          return {
+            ok: true,
+            data: {
+              id: 'pending-capture-1',
+              action: 'generate-doc',
+              context: {
+                action: 'generate-doc',
+                pageUrl: 'https://example.com/article',
+                pageTitle: 'Example Article',
+                selectedImages: [],
+              },
+              autoRun: true,
+              customPrompt: '把右键菜单预览内容整理为知识条目。',
+              createdAt: Date.now(),
+            },
+          };
+        }
+
+        return { ok: true, data: null };
+      },
+    );
+
+    render(App);
+
+    await waitFor(() =>
+      expect(sendMessageMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'START_CHAT',
+          payload: expect.objectContaining({
+            message: '把右键菜单预览内容整理为知识条目。',
+            intent: 'knowledge_entry',
           }),
         }),
       ),
@@ -199,6 +241,7 @@ describe('Sidepanel App current chat session restore', () => {
           type: 'START_CHAT',
           payload: expect.objectContaining({
             message: '读取附件并整理为知识条目。',
+            intent: 'knowledge_entry',
             attachment: {
               name: 'notes.md',
               size: 7,
