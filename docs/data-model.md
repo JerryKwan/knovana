@@ -314,6 +314,7 @@ claude-agent-sdk-typescript Agent 接收指令：
 Chrome 扩展预处理媒体:
   1. 下载网页媒体并上传到 /api/v1/attachments
   2. 使用后端返回的真实 attachments/... 路径替换正文里的原媒体 URL
+  3. 对图文混排内容，按捕获时的有序内容块重新生成 Markdown，尽量保持图片引用与原网页相邻段落的位置
        │
        ▼
 Agent 自主决策，调用 MCP Tools:

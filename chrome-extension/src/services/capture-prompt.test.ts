@@ -38,4 +38,45 @@ describe('knowledge entry prompt', () => {
     expect(prompt).toContain('不要调用后端或 Agent 工具从网页媒体 URL 再次下载文件');
     expect(prompt).not.toContain('https://cdn.example.com/private/image.png');
   });
+
+  it('fills capture content from page metadata when extraction returns empty text', () => {
+    const prompt = generateCapturePrompt(
+      'extract-page',
+      {
+        pageTitle: 'Akshay 🚀 on X: "Anatomy of the .claude/ folder" / X',
+        pageUrl: 'https://x.com/akshay_pachaar/status/2035341800739877091',
+        description: 'A thread about the .claude folder.',
+        selectedText: '',
+        selectedHtml: '',
+        selectedImages: [],
+      },
+      '',
+      '',
+    );
+
+    expect(prompt).toContain('页面标题：Akshay 🚀 on X: "Anatomy of the .claude/ folder" / X');
+    expect(prompt).toContain('页面描述：A thread about the .claude folder.');
+    expect(prompt).toContain('页面链接：https://x.com/akshay_pachaar/status/2035341800739877091');
+    expect(prompt).not.toContain('**整理内容**：\n"""\n\n"""');
+  });
+
+  it('adds page metadata when extracted capture content only contains images', () => {
+    const prompt = generateCapturePrompt(
+      'extract-page',
+      {
+        pageTitle: 'Akshay 🚀 on X: "Anatomy of the .claude/ folder" / X',
+        pageUrl: 'https://x.com/akshay_pachaar/status/2035341800739877091',
+        selectedText:
+          '![image](attachments/HD78D48b0AAI72h-2.jpg)\n\n![image](attachments/HD70c_tbMAAvhZK-3.jpg)',
+        selectedHtml: '',
+        selectedImages: [],
+      },
+      '',
+      '\n\n【捕获的媒体文件列表】:\n- ![media](attachments/HD78D48b0AAI72h-2.jpg)',
+    );
+
+    expect(prompt).toContain('页面标题：Akshay 🚀 on X: "Anatomy of the .claude/ folder" / X');
+    expect(prompt).toContain('页面链接：https://x.com/akshay_pachaar/status/2035341800739877091');
+    expect(prompt).toContain('![image](attachments/HD78D48b0AAI72h-2.jpg)');
+  });
 });

@@ -42,6 +42,10 @@ export function generateCapturePrompt(
 ): string {
   const selectedText = context.selectedText || '';
   const selectedHtml = context.selectedHtml || '';
+  const rawCaptureContent = selectedText.trim() || selectedHtml.trim();
+  const captureContent = hasMeaningfulTextContent(rawCaptureContent)
+    ? rawCaptureContent
+    : buildFallbackCaptureContent(context, imagesSection, rawCaptureContent);
   const uploadedMediaPath = mediaLocalPath || context.mediaLocalPath || '';
   if (action === 'generate-doc' || action === 'extract-page') {
     const isSelection = action === 'generate-doc';
@@ -58,14 +62,14 @@ export function generateCapturePrompt(
 
 **整理内容**：
 """
-${selectedText || selectedHtml}
+${captureContent}
 """${imagesSection}
 
 **具体要求**：
 1. 提炼核心观点与关键知识，使用 \`obsidian-markdown\` 技能规范，形成符合 Obsidian Flavored Markdown (OFM) 格式的笔记（包含 YAML frontmatter、双链 [[Wikilinks]]、必要时使用 [!note] 等 Callouts 块以及高亮 ==text== 等）。
 2. 保持专业度和可读性，剔除页面无关信息。
 3. **必须保留原文所使用的撰写语言，绝对禁止进行翻译（例如：英文原文必须整理成英文条目，中文原文则整理成中文条目）。**
-4. **必须完整保留正文内容中嵌入的所有图片引用（即形如 \`![image](attachments/...)\` 的本地图片语法），将它们嵌入到整理后条目的对应上下文位置中，绝对不能遗漏、遗失或丢弃这些图片。**
+4. **必须完整保留“整理内容”中嵌入的所有图片引用（即形如 \`![image](attachments/...)\` 的本地图片语法），这些引用已经按原网页上下文位置插入；整理时必须保留在相邻段落附近，不要统一移动到文末。**
 5. 请务必使用 \`save_to_kb\` 工具将整理后的条目保存到 Obsidian 知识库中（category 默认设为 'inbox'，title 应当精炼醒目）。
 6. 在回答中向我展示整理后的笔记，并告知文件保存的相对路径。`;
   } else if (action === 'save-selection') {
@@ -78,13 +82,13 @@ ${selectedText || selectedHtml}
 
 **保存内容**：
 """
-${selectedText || selectedHtml}
+${captureContent}
 """${imagesSection}
 
 **具体要求**：
 1. 请勿修改、重写或润色“保存内容”里的文本，确保原汁原味。
 2. 针对内容主题进行分析，提取出 2-5 个便于后续检索分类的标签。
-3. **务必完整保留保存内容中的所有图片引用（形如 \`![image](attachments/...)\`）。**
+3. **务必完整保留“保存内容”中的所有图片引用（形如 \`![image](attachments/...)\`），并保留它们相对文本段落的位置，不要统一移动到文末。**
 4. 务必使用 \`obsidian-markdown\` 技能规范（生成 YAML frontmatter 等）和 \`save_to_kb\` 工具保存该条目（category 默认使用 'inbox'）。
 5. 在回答中向我展示保存的内容与提取的标签，并告知文件保存的相对路径。`;
   } else if (action === 'save-media') {
@@ -113,4 +117,28 @@ ${notesSection}
 4. 在回答中向我展示生成的标签，并告知文件保存的相对路径。`;
   }
   return '';
+}
+
+function buildFallbackCaptureContent(
+  context: PageSnapshot & { mediaUrl?: string; mediaLocalPath?: string },
+  imagesSection: string,
+  existingContent = '',
+): string {
+  const lines = [
+    `页面标题：${context.pageTitle || '未命名页面'}`,
+    context.description ? `页面描述：${context.description}` : '',
+    context.pageUrl ? `页面链接：${context.pageUrl}` : '',
+    existingContent.trim(),
+    imagesSection.trim() ? '已捕获到媒体附件，见下方媒体文件列表。' : '',
+  ].filter(Boolean);
+
+  return lines.join('\n');
+}
+
+function hasMeaningfulTextContent(value: string): boolean {
+  const withoutImages = value
+    .replace(/!\[[^\]]*]\([^)]+\)/g, '')
+    .replace(/<img\b[^>]*>/gi, '')
+    .replace(/\s+/g, '');
+  return withoutImages.length > 0;
 }

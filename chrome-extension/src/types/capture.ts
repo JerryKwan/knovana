@@ -7,6 +7,10 @@ export interface CapturedImage {
   alt?: string;
 }
 
+export type CapturedContentBlock =
+  | { type: 'text'; text: string }
+  | { type: 'image'; src: string; alt?: string };
+
 export type UploadedCaptureAssetKind = 'primary-media' | 'content-image';
 
 export interface UploadedCaptureAsset {
@@ -30,6 +34,7 @@ export interface PageSnapshot {
   selectedText?: string;
   selectedHtml?: string;
   selectedImages: CapturedImage[];
+  contentBlocks?: CapturedContentBlock[];
 }
 
 export interface ActionContext extends PageSnapshot {
