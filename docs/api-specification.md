@@ -71,6 +71,13 @@ Chrome 扩展与后端之间的 HTTP API 规范。
     "size": 245000,
     "path": "attachments/研究报告.pdf" // 后端临时附件路径
   },
+  "attachments": [                    // 可选，多附件；右键捕获图片等场景使用
+    {
+      "name": "image-2.jpg",
+      "size": 120340,
+      "path": "attachments/image-2.jpg"
+    }
+  ],
   "context": {                        // 可选，页面上下文
     "page_url": "https://example.com/article",
     "page_title": "Some Article",
@@ -89,7 +96,7 @@ data: 回复
 data: [DONE]
 ```
 
-当 `intent` 为 `knowledge_entry` 且请求包含 `attachment` 时，后端会把该附件纳入本次知识条目保存上下文；Agent 调用 `save_to_kb` 保存条目时，附件会被归档到条目目录的 `assets/` 中，并触发 `目录/index.md` 存储形式。为了避免大文档占满 Agent 上下文，`read_attachment` 只向 Agent 暴露受限摘要预览：文本附件限制返回字符数，PDF/Office 等文档附件默认只解析前 3 页；原始附件文件仍会完整保存和归档。普通 `chat` 意图下，附件仅作为当前消息的临时附件，除非用户或 Agent 明确执行归档操作。
+当 `intent` 为 `knowledge_entry` 且请求包含 `attachment` 或 `attachments` 时，后端会先校验这些 `attachments/...` 路径对应的临时上传文件确实存在；校验通过后再把附件纳入本次知识条目保存上下文。Agent 调用 `save_to_kb` 保存条目时，附件会被归档到条目目录的 `assets/` 中，并触发 `目录/index.md` 存储形式。为了避免大文档占满 Agent 上下文，`read_attachment` 只向 Agent 暴露受限摘要预览：文本附件限制返回字符数，PDF/Office 等文档附件默认只解析前 3 页；原始附件文件仍会完整保存和归档。普通 `chat` 意图下，附件仅作为当前消息的临时附件，除非用户或 Agent 明确执行归档操作。
 
 ### GET /api/chat/sessions
 
@@ -190,9 +197,14 @@ file: <binary file data>
 // Response 200
 {
   "url": "/api/v1/attachments/usr_abc123/%E7%A0%94%E7%A9%B6%E6%8A%A5%E5%91%8A.pdf",
-  "filename": "研究报告.pdf"
+  "filename": "研究报告.pdf",
+  "path": "attachments/研究报告.pdf",
+  "size": 245000,
+  "mime_type": "application/pdf"
 }
 ```
+
+客户端必须使用响应中的 `path` 作为后续 prompt 和 `/api/v1/chat` 请求中的附件路径。由于后端会在同名文件冲突时追加 `-2`、`-3` 等数字后缀，客户端不能自行根据原始 URL 或原始文件名推断最终 `attachments/...` 路径。
 
 ---
 

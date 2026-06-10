@@ -100,6 +100,23 @@ export function createAttachmentManagerTool(ctx: ToolContext) {
 
           const srcPath = join(ctx.kbRoot, "attachments", sourceFilename);
           if (!existsSync(srcPath)) {
+            const alreadyImported = await findAlreadyImportedAsset(
+              fileOps,
+              entryId,
+              sourceFilename,
+            );
+            if (alreadyImported) {
+              return {
+                content: [
+                  {
+                    type: "text",
+                    text: `附件 "${alreadyImported.filename}" 已经归档到目标条目的 assets 目录，无需重复导入。
+本地相对引用路径为: ${alreadyImported.assetRef}。`,
+                  },
+                ],
+              };
+            }
+
             return {
               isError: true,
               content: [
@@ -278,6 +295,46 @@ export function createAttachmentManagerTool(ctx: ToolContext) {
       }
     },
   );
+}
+
+async function findAlreadyImportedAsset(
+  fileOps: KnowledgeFileOps,
+  entryId: string,
+  sourceFilename: string,
+): Promise<{ filename: string; assetRef: string } | null> {
+  const candidateEntryIds = [entryId];
+  if (!entryId.endsWith("/index.md")) {
+    const currentDir = dirname(entryId).replace(/\\/g, "/");
+    const slug = basename(entryId, ".md");
+    candidateEntryIds.push(`${currentDir}/${slug}/index.md`);
+  }
+
+  for (const candidateEntryId of candidateEntryIds) {
+    try {
+      const entry = await fileOps.readEntry(candidateEntryId);
+      const attachment = entry.attachments?.find(
+        (item) => item.name === sourceFilename,
+      );
+      if (!attachment) continue;
+
+      const targetFilePath = fileOps.resolveEntryPath(candidateEntryId);
+      const assetPath = join(
+        dirname(targetFilePath),
+        "assets",
+        attachment.name,
+      );
+      if (!existsSync(assetPath)) continue;
+
+      return {
+        filename: attachment.name,
+        assetRef: `assets/${encodePathSegments(attachment.name)}`,
+      };
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
 }
 
 function decodeFilenameFromUrlPath(pathname: string): string {

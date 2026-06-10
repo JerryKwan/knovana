@@ -36,12 +36,13 @@ ${contentMode}
 
 export function generateCapturePrompt(
   action: CaptureAction,
-  context: PageSnapshot & { mediaUrl?: string },
+  context: PageSnapshot & { mediaUrl?: string; mediaLocalPath?: string },
   mediaLocalPath: string,
   imagesSection: string,
 ): string {
   const selectedText = context.selectedText || '';
   const selectedHtml = context.selectedHtml || '';
+  const uploadedMediaPath = mediaLocalPath || context.mediaLocalPath || '';
   if (action === 'generate-doc' || action === 'extract-page') {
     const isSelection = action === 'generate-doc';
     const header = isSelection
@@ -87,23 +88,29 @@ ${selectedText || selectedHtml}
 4. 务必使用 \`obsidian-markdown\` 技能规范（生成 YAML frontmatter 等）和 \`save_to_kb\` 工具保存该条目（category 默认使用 'inbox'）。
 5. 在回答中向我展示保存的内容与提取的标签，并告知文件保存的相对路径。`;
   } else if (action === 'save-media') {
+    if (!uploadedMediaPath) {
+      return '';
+    }
+
     let notesSection = '';
     if (selectedText.trim()) {
       notesSection = `\n**附加说明/备注**：\n"""\n${selectedText.trim()}\n"""\n`;
     }
+    const mediaPathLine = `- 浏览器扩展已下载并上传媒体文件：${uploadedMediaPath}`;
+    const mediaEmbedExample = `![media](${uploadedMediaPath})`;
     return `【网页捕获：保存媒体文件】
-请保存以下网页媒体文件，并为其自动分析并提取分类标签。
+请保存以下已由浏览器扩展下载并上传的网页媒体文件，并为其自动分析并提取分类标签。
 
 **原始来源**：
 - 页面标题：${context.pageTitle}
 - 页面链接：${context.pageUrl}
-- 媒体原链接：${context.mediaUrl}
-- 本地保存路径：${mediaLocalPath || 'attachments/'}
+${mediaPathLine}
 ${notesSection}
 **具体要求**：
-1. 结合页面上下文和文件名，以及用户提供的附加说明（如有），提取 2-5 个便于后续分类 and 检索的标签。
-2. 务必使用 \`obsidian-markdown\` 技能规范（生成 YAML frontmatter 等）和 \`save_to_kb\` 工具将此条目保存到 Obsidian 知识库中。请在 content 中以 Markdown 图片语法引用的形式嵌入本地保存路径（如 \`![media](${mediaLocalPath})\`）。如果用户提供了附加说明/备注，请将该备注以文本段落形式保存在图片引用下方。
-3. 在回答中向我展示生成的标签，并告知文件保存的相对路径。`;
+1. 结合页面上下文和文件名，以及用户提供的附加说明（如有），提取 2-5 个便于后续分类和检索的标签。
+2. **只使用上面的本地保存路径，不要调用后端或 Agent 工具从网页媒体 URL 再次下载文件；如果没有明确的 \`attachments/...\` 路径，请停止并提示用户重新捕获。**
+3. 务必使用 \`obsidian-markdown\` 技能规范（生成 YAML frontmatter 等）和 \`save_to_kb\` 工具将此条目保存到 Obsidian 知识库中。请在 content 中以 Markdown 图片语法引用的形式嵌入本地保存路径（如 \`${mediaEmbedExample}\`）。如果用户提供了附加说明/备注，请将该备注以文本段落形式保存在图片引用下方。
+4. 在回答中向我展示生成的标签，并告知文件保存的相对路径。`;
   }
   return '';
 }

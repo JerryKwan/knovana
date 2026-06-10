@@ -46,6 +46,18 @@ const uploadRoute = createRoute({
               description: "保存至本地的文件名",
               example: "研究报告.pdf",
             }),
+            path: z.string().openapi({
+              description: "附件在知识库临时 attachments 目录下的相对路径",
+              example: "attachments/研究报告.pdf",
+            }),
+            size: z.number().openapi({
+              description: "附件字节大小",
+              example: 245000,
+            }),
+            mime_type: z.string().optional().openapi({
+              description: "上传文件 MIME 类型",
+              example: "application/pdf",
+            }),
           }),
         },
       },
@@ -158,6 +170,9 @@ attachmentsRoutes.openapi(uploadRoute, async (c) => {
     {
       url: `/api/v1/attachments/${encodeURIComponent(user.id)}/${encodePathSegments(result.filename)}`,
       filename: result.filename,
+      path: `attachments/${result.filename}`,
+      size: result.sizeBytes,
+      mime_type: file.type || undefined,
     },
     200,
   );

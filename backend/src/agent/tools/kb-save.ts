@@ -122,28 +122,63 @@ export function createSaveToKbTool(ctx: ToolContext) {
       if (hasAttachments) {
         const targetFilePath = fileOps.resolveEntryPath(entryId);
         const assetsDir = join(dirname(targetFilePath), "assets");
-        await mkdir(assetsDir, { recursive: true });
-
         const globalAttachmentsDir = join(ctx.kbRoot, "attachments");
-        const finalAttachments: typeof args.attachments = [];
+
         for (const att of args.attachments) {
-          const sourcePath = join(globalAttachmentsDir, att.name);
-          let finalName = att.name;
-          if (existsSync(sourcePath)) {
-            const moved = await moveFileUnique(sourcePath, assetsDir, att.name);
-            finalName = moved.filename;
+          const sourceFilename = extractAttachmentFilename(
+            `attachments/${att.name}`,
+          );
+          if (!sourceFilename) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: "text",
+                  text: `错误: 非法的附件文件名 "${att.name}"。`,
+                },
+              ],
+            };
           }
 
-          const finalAssetRef = `assets/${encodePathSegments(finalName)}`;
-          // Rewrite content references: replace "attachments/filename" with "assets/filename"
-          entryContent = entryContent.replaceAll(
+          const sourcePath = join(globalAttachmentsDir, sourceFilename);
+          if (!existsSync(sourcePath)) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: "text",
+                  text: `错误: 找不到本地已上传文件 "attachments/${sourceFilename}"。`,
+                },
+              ],
+            };
+          }
+        }
+
+        await mkdir(assetsDir, { recursive: true });
+
+        const finalAttachments: typeof args.attachments = [];
+        for (const att of args.attachments) {
+          const sourceFilename = extractAttachmentFilename(
             `attachments/${att.name}`,
-            finalAssetRef,
+          )!;
+          const sourcePath = join(globalAttachmentsDir, sourceFilename);
+          const moved = await moveFileUnique(
+            sourcePath,
+            assetsDir,
+            sourceFilename,
           );
-          entryContent = entryContent.replaceAll(
+          const finalName = moved.filename;
+
+          const finalAssetRef = `assets/${encodePathSegments(finalName)}`;
+          const refs = new Set([
+            `attachments/${att.name}`,
+            `attachments/${sourceFilename}`,
             `attachments/${encodeURIComponent(att.name)}`,
-            finalAssetRef,
-          );
+            `attachments/${encodeURIComponent(sourceFilename)}`,
+          ]);
+          for (const ref of refs) {
+            entryContent = entryContent.replaceAll(ref, finalAssetRef);
+          }
           finalAttachments.push({ ...att, name: finalName });
         }
         args.attachments = finalAttachments;

@@ -92,7 +92,7 @@
       attachedFile = {
         name: file.name,
         size: file.size,
-        path: `attachments/${result.filename}`,
+        path: result.path,
       };
     } catch (err) {
       alert(`上传失败: ${err instanceof Error ? err.message : String(err)}`);

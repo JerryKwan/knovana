@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeAll, beforeEach, vi } from "vitest";
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { getDatabase } from "../src/storage/database";
 import { runMigrations } from "../src/storage/migrations";
 import { ChatService } from "../src/services/chat-service";
@@ -448,6 +450,7 @@ describe("ChatService Tests", () => {
     const { service, agent } = createServiceWithSdkMessages(userId, [
       assistantMessage(sessionId, [{ type: "text", text: "Saved" }]),
     ]);
+    await writeUploadedTestAttachment("研究报告.pdf", "pdf content");
 
     await collectChunks(
       service.chat({
@@ -477,6 +480,31 @@ describe("ChatService Tests", () => {
       undefined,
     );
     expect(getPendingKnowledgeAttachments(userId)).toEqual([]);
+  });
+
+  it("rejects chat attachments that were not confirmed in the upload directory", async () => {
+    const userId = "usr_test_missing_attachment";
+    insertUser(userId);
+
+    const { service, agent } = createServiceWithSdkMessages(userId, [
+      assistantMessage("sess_missing_attachment", [
+        { type: "text", text: "Should not run" },
+      ]),
+    ]);
+
+    await expect(
+      collectChunks(
+        service.chat({
+          message: "请整理缺失附件",
+          intent: "knowledge_entry",
+          attachment: {
+            name: "missing.jpg",
+            path: "attachments/missing.jpg",
+          },
+        }),
+      ),
+    ).rejects.toThrow("Uploaded attachment does not exist");
+    expect(agent.chat).not.toHaveBeenCalled();
   });
 
   it("keeps PSP block indexes globally ordered across tool calls and follow-up assistant messages", async () => {
@@ -634,6 +662,15 @@ function insertUser(userId: string): void {
        VALUES (?, ?, ?, ?, ?)`,
     )
     .run(userId, `${userId}_name`, "hash", userId, "{}");
+}
+
+async function writeUploadedTestAttachment(
+  filename: string,
+  content: string | Buffer,
+): Promise<void> {
+  const dir = join("tests/knowledge-base", "attachments");
+  await mkdir(dir, { recursive: true });
+  await writeFile(join(dir, filename), content);
 }
 
 function getStoredMessages(sessionId: string) {

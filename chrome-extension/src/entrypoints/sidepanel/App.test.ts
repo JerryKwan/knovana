@@ -107,10 +107,17 @@ describe('Sidepanel App current chat session restore', () => {
     sendMessageMock.mockReset();
     fetchMock.mockReset();
     fetchMock.mockResolvedValue(
-      new Response(JSON.stringify({ filename: 'uploaded.md', url: '/attachments/uploaded.md' }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }),
+      new Response(
+        JSON.stringify({
+          filename: 'uploaded.md',
+          path: 'attachments/uploaded.md',
+          url: '/attachments/uploaded.md',
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
     );
     installChromeMock();
     installRuntimeResponses();
@@ -229,6 +236,208 @@ describe('Sidepanel App current chat session restore', () => {
           type: 'START_CHAT',
           payload: expect.objectContaining({
             message: '把右键菜单预览内容整理为知识条目。',
+            intent: 'knowledge_entry',
+          }),
+        }),
+      ),
+    );
+  });
+
+  it('sends uploaded capture assets with context-menu overlay prompts', async () => {
+    sendMessageMock.mockImplementation(
+      async (message: { type: string; payload?: Record<string, unknown> }) => {
+        if (message.type === 'CONSUME_PENDING_ACTION') {
+          return {
+            ok: true,
+            data: {
+              id: 'pending-capture-with-asset',
+              action: 'save-media',
+              context: {
+                action: 'save-media',
+                pageUrl: 'https://example.com/article',
+                pageTitle: 'Example Article',
+                selectedImages: [],
+                uploadedAssets: [
+                  {
+                    kind: 'primary-media',
+                    sourceUrl: 'https://example.com/image.jpg',
+                    filename: 'image-2.jpg',
+                    path: 'attachments/image-2.jpg',
+                    url: '/api/v1/attachments/usr_test/image-2.jpg',
+                    size: 123,
+                  },
+                ],
+              },
+              autoRun: true,
+              customPrompt: '请保存 ![media](attachments/image-2.jpg)',
+              createdAt: Date.now(),
+            },
+          };
+        }
+
+        return { ok: true, data: null };
+      },
+    );
+
+    render(App);
+
+    await waitFor(() =>
+      expect(sendMessageMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'START_CHAT',
+          payload: expect.objectContaining({
+            message: '请保存 ![media](attachments/image-2.jpg)',
+            intent: 'knowledge_entry',
+            attachments: [
+              {
+                name: 'image-2.jpg',
+                size: 123,
+                path: 'attachments/image-2.jpg',
+              },
+            ],
+          }),
+        }),
+      ),
+    );
+  });
+
+  it('shows pending capture errors instead of failing silently', async () => {
+    sendMessageMock.mockImplementation(
+      async (message: { type: string; payload?: Record<string, unknown> }) => {
+        if (message.type === 'CONSUME_PENDING_ACTION') {
+          return {
+            ok: true,
+            data: {
+              id: 'pending-capture-missing-asset',
+              action: 'save-media',
+              context: {
+                action: 'save-media',
+                pageUrl: 'https://example.com/article',
+                pageTitle: 'Example Article',
+                selectedImages: [],
+                uploadedAssets: [],
+              },
+              autoRun: true,
+              customPrompt: '请保存 ![media](attachments/missing.jpg)',
+              createdAt: Date.now(),
+            },
+          };
+        }
+
+        return { ok: true, data: null };
+      },
+    );
+
+    render(App);
+
+    expect(await screen.findByText('捕获内容发送失败')).toBeTruthy();
+    expect(screen.getByText(/attachments\/missing\.jpg/)).toBeTruthy();
+    expect(
+      sendMessageMock.mock.calls.some(
+        ([message]) => (message as { type?: string }).type === 'START_CHAT',
+      ),
+    ).toBe(false);
+  });
+
+  it('ignores placeholder attachment examples when validating capture prompts', async () => {
+    sendMessageMock.mockImplementation(
+      async (message: { type: string; payload?: Record<string, unknown> }) => {
+        if (message.type === 'CONSUME_PENDING_ACTION') {
+          return {
+            ok: true,
+            data: {
+              id: 'pending-capture-with-placeholder-example',
+              action: 'save-media',
+              context: {
+                action: 'save-media',
+                pageUrl: 'https://example.com/article',
+                pageTitle: 'Example Article',
+                selectedImages: [],
+                uploadedAssets: [
+                  {
+                    kind: 'primary-media',
+                    sourceUrl: 'https://example.com/image.jpg',
+                    filename: 'image-2.jpg',
+                    path: 'attachments/image-2.jpg',
+                    url: '/api/v1/attachments/usr_test/image-2.jpg',
+                    size: 123,
+                  },
+                ],
+              },
+              autoRun: true,
+              customPrompt:
+                '必须保留形如 `![image](attachments/...)` 的图片引用。请保存 ![media](attachments/image-2.jpg)',
+              createdAt: Date.now(),
+            },
+          };
+        }
+
+        return { ok: true, data: null };
+      },
+    );
+
+    render(App);
+
+    await waitFor(() =>
+      expect(sendMessageMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'START_CHAT',
+          payload: expect.objectContaining({
+            message:
+              '必须保留形如 `![image](attachments/...)` 的图片引用。请保存 ![media](attachments/image-2.jpg)',
+            attachments: [
+              {
+                name: 'image-2.jpg',
+                size: 123,
+                path: 'attachments/image-2.jpg',
+              },
+            ],
+          }),
+        }),
+      ),
+    );
+    expect(screen.queryByText('捕获内容发送失败')).toBeNull();
+  });
+
+  it('consumes pending capture notifications when the panel is already open', async () => {
+    let pendingAction: Record<string, unknown> | null = null;
+    sendMessageMock.mockImplementation(
+      async (message: { type: string; payload?: Record<string, unknown> }) => {
+        if (message.type === 'CONSUME_PENDING_ACTION') {
+          const current = pendingAction;
+          pendingAction = null;
+          return { ok: true, data: current };
+        }
+
+        return { ok: true, data: null };
+      },
+    );
+
+    render(App);
+
+    await screen.findByPlaceholderText('向 Knovana 提问…');
+    pendingAction = {
+      id: 'pending-capture-notification',
+      action: 'extract-page',
+      context: {
+        action: 'extract-page',
+        pageUrl: 'https://example.com/article',
+        pageTitle: 'Example Article',
+        selectedImages: [],
+      },
+      autoRun: true,
+      customPrompt: '把已打开面板收到的右键任务整理为知识条目。',
+      createdAt: Date.now(),
+    };
+
+    dispatchRuntimeMessage({ type: 'PENDING_ACTION_AVAILABLE' });
+
+    await waitFor(() =>
+      expect(sendMessageMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'START_CHAT',
+          payload: expect.objectContaining({
+            message: '把已打开面板收到的右键任务整理为知识条目。',
             intent: 'knowledge_entry',
           }),
         }),

@@ -4,7 +4,7 @@ import {
   collectPageSnapshot,
   contextFromMenu,
   createPendingAction,
-  downloadAndUploadAsset,
+  prepareCaptureUploads,
 } from '../services/capture';
 import { generateCapturePrompt } from '../services/capture-prompt';
 import {
@@ -37,6 +37,7 @@ const CAPTURE_MENU_IDS = new Set<CaptureAction>([
 
 const activeAbortControllers = new Map<string, AbortController>();
 const streamSurfaceTargets = new Map<string, string>();
+let pendingActionConsumeInFlight = false;
 
 interface RegisteredSurface {
   surfaceId: string;
@@ -162,54 +163,32 @@ async function handleContextMenu(
   if (!CAPTURE_MENU_IDS.has(info.menuItemId as CaptureAction)) return;
 
   const action = info.menuItemId as CaptureAction;
+  const openedSurfacePromise = maybeOpenPreferredSurface(tab.windowId);
 
   const snapshot = await getTabSnapshot(tab, action);
   const context = contextFromMenu(action, info, snapshot);
 
-  let mediaLocalPath = '';
-  if (action === 'save-media' && context.mediaUrl) {
-    const res = await downloadAndUploadAsset(context.mediaUrl);
-    if (res) {
-      mediaLocalPath = `attachments/${res.filename}`;
-    }
+  let prepared: Awaited<ReturnType<typeof prepareCaptureUploads>>;
+  try {
+    prepared = await prepareCaptureUploads(action, context);
+  } catch (error) {
+    await openedSurfacePromise;
+    await chrome.scripting
+      .executeScript({
+        target: { tabId: tab.id },
+        func: notifyCapturePreparationFailed,
+        args: [error instanceof Error ? error.message : String(error)],
+      })
+      .catch(() => undefined);
+    return;
   }
-
-  let selectedHtml = context.selectedHtml || '';
-  let selectedText = context.selectedText || '';
-  let imagesSection = '';
-  if (context.selectedImages && context.selectedImages.length > 0) {
-    const uploadPromises = context.selectedImages.map(async (img) => {
-      const res = await downloadAndUploadAsset(img.src);
-      return { original: img.src, local: res ? `attachments/${res.filename}` : null };
-    });
-    const uploadedImages = await Promise.all(uploadPromises);
-
-    const localRefs = uploadedImages.filter((item) => item.local !== null);
-    if (localRefs.length > 0) {
-      imagesSection =
-        '\n\n【捕获的媒体文件列表】:\n' +
-        localRefs.map((item) => `- ![media](${item.local})`).join('\n');
-    }
-
-    uploadedImages.forEach((img) => {
-      if (img.local) {
-        selectedHtml = selectedHtml.replaceAll(img.original, img.local);
-        selectedText = selectedText.replaceAll(img.original, img.local);
-      }
-    });
-  }
-
-  const updatedContext = {
-    ...context,
-    selectedHtml,
-    selectedText,
-  };
+  const updatedContext = prepared.context;
 
   const initialPrompt = generateCapturePrompt(
     action,
     updatedContext,
-    mediaLocalPath,
-    imagesSection,
+    prepared.mediaLocalPath,
+    prepared.imagesSection,
   );
 
   await chrome.scripting.executeScript({
@@ -217,6 +196,11 @@ async function handleContextMenu(
     func: injectCaptureOverlay,
     args: [initialPrompt, actionLabel(action), snapshot.pageTitle, action, updatedContext],
   });
+  await openedSurfacePromise;
+}
+
+function notifyCapturePreparationFailed(message: string) {
+  window.alert(`Knovana 捕获失败：${message}`);
 }
 
 async function handleCommand(command: string): Promise<void> {
@@ -241,7 +225,7 @@ async function handleCommand(command: string): Promise<void> {
     );
     await savePendingAction(pending);
     const openedSurfaceId = await maybeOpenPreferredSurface(tab.windowId);
-    await broadcastPendingAction(pending, openedSurfaceId ?? getActiveSurface()?.surfaceId);
+    await notifyPendingActionAvailable(openedSurfaceId ?? getActiveSurface()?.surfaceId);
   }
 }
 
@@ -270,15 +254,18 @@ async function handleRuntimeMessage(
       return okResponse(null);
 
     case 'ACK_PENDING_ACTION':
-      if (shouldSurfaceHandle(message.payload.surfaceId)) {
+      if (canSurfaceConsumePendingAction(message.payload.surfaceId)) {
         await clearPendingAction(message.payload.actionId);
       }
       return okResponse(null);
 
     case 'CONSUME_PENDING_ACTION':
-      if (!message.payload?.surfaceId || shouldSurfaceHandle(message.payload.surfaceId)) {
-        return okResponse(await consumePendingAction());
+      if (canSurfaceConsumePendingAction(message.payload?.surfaceId)) {
+        return okResponse(await consumePendingActionOnce());
       }
+      return okResponse(null);
+
+    case 'PENDING_ACTION_AVAILABLE':
       return okResponse(null);
 
     case 'CAPTURE_SUBMIT': {
@@ -299,7 +286,7 @@ async function handleRuntimeMessage(
       }
       const targetWindowId = await getBrowserWindowId(sourceWindowId);
       const openedSurfaceId = await openPreferredSurface(targetWindowId);
-      await broadcastPendingAction(pending, openedSurfaceId ?? getActiveSurface()?.surfaceId);
+      await notifyPendingActionAvailable(openedSurfaceId ?? getActiveSurface()?.surfaceId);
       return okResponse({ queued: true });
     }
 
@@ -607,6 +594,19 @@ function getActiveSurface(): RegisteredSurface | undefined {
   return activeSurfaceId ? registeredSurfaces.get(activeSurfaceId) : undefined;
 }
 
+async function consumePendingActionOnce(): Promise<PendingAction | null> {
+  if (pendingActionConsumeInFlight) {
+    return null;
+  }
+
+  pendingActionConsumeInFlight = true;
+  try {
+    return await consumePendingAction();
+  } finally {
+    pendingActionConsumeInFlight = false;
+  }
+}
+
 function getNewestSurface(surface?: ExtensionSurface): RegisteredSurface | undefined {
   return Array.from(registeredSurfaces.values())
     .filter((item) => !surface || item.surface === surface)
@@ -615,6 +615,19 @@ function getNewestSurface(surface?: ExtensionSurface): RegisteredSurface | undef
 
 function shouldSurfaceHandle(surfaceId: string): boolean {
   return !activeSurfaceId || activeSurfaceId === surfaceId;
+}
+
+function canSurfaceConsumePendingAction(surfaceId?: string): boolean {
+  if (!surfaceId) {
+    return true;
+  }
+
+  if (!registeredSurfaces.has(surfaceId)) {
+    return shouldSurfaceHandle(surfaceId);
+  }
+
+  setActiveSurface(surfaceId);
+  return true;
 }
 
 function resolveMessageSurfaceId(surfaceId?: string): string {
@@ -812,19 +825,17 @@ async function closeSidePanel(windowId: number): Promise<void> {
   }
 }
 
-async function broadcastPendingAction(
-  pending: PendingAction,
-  targetSurfaceId?: string,
-): Promise<void> {
-  if (!targetSurfaceId) return;
+async function notifyPendingActionAvailable(targetSurfaceId?: string): Promise<void> {
+  const message: RuntimeMessage = targetSurfaceId
+    ? {
+        type: 'PENDING_ACTION_AVAILABLE',
+        targetSurfaceId,
+      }
+    : {
+        type: 'PENDING_ACTION_AVAILABLE',
+      };
 
-  await chrome.runtime
-    .sendMessage<RuntimeMessage>({
-      type: 'PENDING_ACTION',
-      targetSurfaceId,
-      payload: pending,
-    })
-    .catch(() => undefined);
+  await chrome.runtime.sendMessage<RuntimeMessage>(message).catch(() => undefined);
 }
 
 async function sendStreamEvent(payload: ApiStreamEvent): Promise<void> {

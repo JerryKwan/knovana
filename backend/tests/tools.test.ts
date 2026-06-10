@@ -254,6 +254,35 @@ describe("Agent Tools - read_attachment & attachment_manager import", () => {
         "doc.txt",
       ]);
     });
+
+    it("should treat an already archived local attachment as an idempotent import", async () => {
+      const noteEntry = {
+        id: "inbox/already-archived/index.md",
+        title: "Already Archived",
+        captured_at: new Date().toISOString(),
+        tags: [],
+        type: "note" as const,
+        attachments: [{ name: "archived.txt", description: "Archived file" }],
+        content: "![doc](assets/archived.txt)",
+      };
+      await fileOps.saveEntry(noteEntry);
+      await indexMgr.addEntry(noteEntry);
+      await writeFile(
+        join(tempKbRoot, "inbox", "already-archived", "assets", "archived.txt"),
+        "archived",
+        "utf8",
+      );
+
+      const result = await (tool.handler as any)({
+        action: "import",
+        local_path: "attachments/archived.txt",
+        target_entry_id: "inbox/already-archived/index.md",
+      });
+
+      expect(result.isError).toBeUndefined();
+      expect(result.content[0].text).toContain("已经归档");
+      expect(result.content[0].text).toContain("assets/archived.txt");
+    });
   });
 
   describe("save_to_kb tool", () => {
@@ -309,6 +338,21 @@ describe("Agent Tools - read_attachment & attachment_manager import", () => {
       } finally {
         clearPendingKnowledgeAttachments(ctx.userId);
       }
+    });
+
+    it("should reject declared attachments that are missing from the upload directory", async () => {
+      const result = await (tool.handler as any)({
+        title: "Missing Attachment Entry",
+        content: "![missing](attachments/missing.jpg)",
+        tags: [],
+        category: "inbox",
+        attachments: [{ name: "missing.jpg", description: "Missing" }],
+      });
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain(
+        '找不到本地已上传文件 "attachments/missing.jpg"',
+      );
     });
   });
 });

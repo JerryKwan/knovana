@@ -40,6 +40,7 @@ export type RuntimeMessage =
       payload: { prompt: string; action: CaptureAction; context: ActionContext };
     }
   | { type: 'CAPTURE_CANCEL' }
+  | { type: 'PENDING_ACTION_AVAILABLE'; targetSurfaceId?: string }
   | { type: 'PENDING_ACTION'; targetSurfaceId?: string; payload: PendingAction }
   | { type: 'STREAM_EVENT'; targetSurfaceId?: string; payload: ApiStreamEvent };
 

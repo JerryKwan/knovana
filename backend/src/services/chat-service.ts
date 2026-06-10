@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { getDatabase } from "../storage/database";
 import { SessionRepository } from "../storage/repositories/session-repo";
 import { MessageRepository } from "../storage/repositories/message-repo";
@@ -11,6 +13,7 @@ import {
   setPendingKnowledgeAttachments,
 } from "../agent/tools/pending-attachments";
 import { config } from "../config";
+import { BadRequestError } from "../utils/errors";
 import { extractAttachmentFilename } from "../utils/filename";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import type {
@@ -23,11 +26,14 @@ export interface ChatInput {
   message: string;
   session_id?: string;
   intent?: "chat" | "knowledge_entry";
-  attachment?: {
-    name: string;
-    size?: number;
-    path: string;
-  };
+  attachment?: ChatAttachmentInput;
+  attachments?: ChatAttachmentInput[];
+}
+
+interface ChatAttachmentInput {
+  name: string;
+  size?: number;
+  path: string;
 }
 
 type PspChunk = { event: string; data: any };
@@ -57,11 +63,9 @@ interface StreamAgentResponseInput {
   sessionId?: string;
   dbInitialized: boolean;
   emitSessionCreated: boolean;
-  attachment?: {
-    name: string;
-    size?: number;
-    path: string;
-  };
+  intent?: "chat" | "knowledge_entry";
+  attachment?: ChatAttachmentInput;
+  attachments?: ChatAttachmentInput[];
 }
 
 export class ChatService {
@@ -93,24 +97,27 @@ export class ChatService {
     }
 
     const intent = input.intent ?? "chat";
+    const attachments = this.normalizeAttachments(input);
+    this.assertUploadedAttachmentsExist(attachments);
 
     if (shouldResume && sessionId) {
       this.ensureSessionForUserMessage(
         sessionId,
         input.message,
         "New Web Capture",
-        input.attachment ? { attachment: input.attachment, intent } : undefined,
+        this.createAttachmentMetadata(input.attachment, attachments, intent),
       );
     }
 
-    const agentPrompt = input.attachment
-      ? this.buildAttachmentPrompt(input.message, input.attachment, intent)
-      : input.message;
+    const agentPrompt =
+      attachments.length > 0
+        ? this.buildAttachmentPrompt(input.message, attachments, intent)
+        : input.message;
 
     const shouldTrackKnowledgeAttachment =
-      intent === "knowledge_entry" && input.attachment !== undefined;
-    if (shouldTrackKnowledgeAttachment && input.attachment) {
-      setPendingKnowledgeAttachments(this.userId, [input.attachment]);
+      intent === "knowledge_entry" && attachments.length > 0;
+    if (shouldTrackKnowledgeAttachment) {
+      setPendingKnowledgeAttachments(this.userId, attachments);
     }
 
     try {
@@ -127,7 +134,9 @@ export class ChatService {
         sessionId,
         dbInitialized: shouldResume,
         emitSessionCreated: !shouldResume,
+        intent,
         attachment: input.attachment,
+        attachments,
       });
     } finally {
       if (shouldTrackKnowledgeAttachment) {
@@ -245,7 +254,9 @@ export class ChatService {
     sessionId,
     dbInitialized,
     emitSessionCreated,
+    intent,
     attachment,
+    attachments,
   }: StreamAgentResponseInput): AsyncGenerator<PspChunk> {
     const messageStart = this.createMessageStartChunk();
     this.logPspChunk("initial", messageStart);
@@ -266,7 +277,7 @@ export class ChatService {
           sessionId,
           userMessage,
           "New Chat",
-          attachment ? { attachment } : undefined,
+          this.createAttachmentMetadata(attachment, attachments, intent),
         );
         dbInitialized = true;
 
@@ -628,9 +639,71 @@ export class ChatService {
     this.messageRepo.create(sessionId, "user", message, metadata);
   }
 
+  private createAttachmentMetadata(
+    attachment?: ChatAttachmentInput,
+    attachments?: ChatAttachmentInput[],
+    intent?: "chat" | "knowledge_entry",
+  ): Record<string, unknown> | undefined {
+    const metadata: Record<string, unknown> = {};
+    if (attachment) {
+      metadata.attachment = attachment;
+    }
+    if (attachments && attachments.length > 0) {
+      metadata.attachments = attachments;
+      if (!metadata.attachment && attachments.length === 1) {
+        metadata.attachment = attachments[0];
+      }
+    }
+    if (intent) {
+      metadata.intent = intent;
+    }
+    return Object.keys(metadata).length > 0 ? metadata : undefined;
+  }
+
   private buildAttachmentPrompt(
     message: string,
-    attachment: NonNullable<ChatInput["attachment"]>,
+    attachments: ChatAttachmentInput[],
+    intent: "chat" | "knowledge_entry",
+  ): string {
+    if (attachments.length === 1) {
+      return this.buildSingleAttachmentPrompt(message, attachments[0], intent);
+    }
+
+    const lines = attachments.map((attachment, index) => {
+      const storedFilename =
+        extractAttachmentFilename(attachment.path) || attachment.path;
+      const sizeLine =
+        attachment.size !== undefined
+          ? `\n  - 文件大小: ${attachment.size} 字节`
+          : "";
+      return `${index + 1}. 原始文件名: ${attachment.name}\n  - 临时存储文件名: ${storedFilename}\n  - 本地路径: ${attachment.path}${sizeLine}`;
+    });
+    const base = `${message}\n\n---\n【用户上传的附件文件】:\n${lines.join("\n")}`;
+
+    if (intent !== "knowledge_entry") {
+      return `${base}\n\n提示: 你可以使用 \`read_attachment\` 工具读取这些附件内容。若要将文件归档/绑定到具体的知识笔记中，请使用 \`attachment_manager\` 工具的 \`import\` 动作。`;
+    }
+
+    const filenames = attachments
+      .map((attachment) => extractAttachmentFilename(attachment.path))
+      .filter((filename): filename is string => Boolean(filename));
+    const saveArgs = filenames.map((filename) => `\`${filename}\``).join("、");
+    const contentRefs = filenames
+      .map((filename) => `\`attachments/${filename}\``)
+      .join("、");
+
+    return `${base}\n\n【知识条目附件归档要求】:
+- 本次消息的目标是形成知识库条目，以上附件必须作为最终知识条目的附件归档，不能只停留在临时 attachments 目录。
+- 如需读取附件摘要预览，请使用 \`read_attachment\` 工具，读取参数使用对应的临时存储文件名。系统会默认只解析文档前 3 页并限制返回字符数，不要绕过该工具直接全文解析附件。
+- 调用 \`save_to_kb\` 保存条目时，必须在 attachments 参数中包含这些附件：name 使用 ${saveArgs}。
+- 如果正文需要引用这些附件，请先使用 ${contentRefs}；保存工具会将其归档到条目目录下的 \`assets/\` 并改写为对应的 \`assets/...\`。
+- 新建知识条目时不要在 \`save_to_kb\` 之后再对同一批临时附件调用 \`attachment_manager import\`，避免重复导入已经被归档的文件。
+- 保存完成后，请在回复中告知最终知识条目的相对路径。`;
+  }
+
+  private buildSingleAttachmentPrompt(
+    message: string,
+    attachment: ChatAttachmentInput,
     intent: "chat" | "knowledge_entry",
   ): string {
     const storedFilename =
@@ -650,7 +723,46 @@ export class ChatService {
 - 请先使用 \`read_attachment\` 工具读取附件摘要预览；读取参数使用临时存储文件名 \`${storedFilename}\`。系统会默认只解析文档前 3 页并限制返回字符数，不要绕过该工具直接全文解析附件。
 - 调用 \`save_to_kb\` 保存条目时，必须在 attachments 参数中包含该附件：name 使用 \`${storedFilename}\`，description 优先使用原始文件名 \`${attachment.name}\`${attachment.size !== undefined ? `，size 使用 ${attachment.size}` : ""}。
 - 如果正文需要引用该附件，请先使用 \`attachments/${storedFilename}\`；保存工具会将其归档到条目目录下的 \`assets/\` 并改写为 \`assets/${storedFilename}\`。
+- 新建知识条目时不要在 \`save_to_kb\` 之后再对同一个临时附件调用 \`attachment_manager import\`，避免重复导入已经被归档的文件。
 - 保存完成后，请在回复中告知最终知识条目的相对路径。`;
+  }
+
+  private normalizeAttachments(input: ChatInput): ChatAttachmentInput[] {
+    const attachments: ChatAttachmentInput[] = [];
+    if (input.attachment) {
+      attachments.push(input.attachment);
+    }
+    if (input.attachments) {
+      attachments.push(...input.attachments);
+    }
+
+    const byPath = new Map<string, ChatAttachmentInput>();
+    for (const attachment of attachments) {
+      if (!byPath.has(attachment.path)) {
+        byPath.set(attachment.path, attachment);
+      }
+    }
+    return Array.from(byPath.values());
+  }
+
+  private assertUploadedAttachmentsExist(
+    attachments: ChatAttachmentInput[],
+  ): void {
+    for (const attachment of attachments) {
+      const filename = extractAttachmentFilename(attachment.path);
+      if (!filename) {
+        throw new BadRequestError(
+          `Invalid uploaded attachment path: ${attachment.path}`,
+        );
+      }
+
+      const sourcePath = join(this.kbRoot, "attachments", filename);
+      if (!existsSync(sourcePath)) {
+        throw new BadRequestError(
+          `Uploaded attachment does not exist: ${attachment.path}`,
+        );
+      }
+    }
   }
 
   private toStatusChunk(msg: any): PspChunk | null {

@@ -28,6 +28,19 @@ export interface ChatRequestBody {
     size?: number;
     path: string;
   };
+  attachments?: Array<{
+    name: string;
+    size?: number;
+    path: string;
+  }>;
+}
+
+export interface AttachmentUploadResponse {
+  filename: string;
+  path: string;
+  url: string;
+  size?: number;
+  mime_type?: string;
 }
 
 export interface RegenerateRequestBody {

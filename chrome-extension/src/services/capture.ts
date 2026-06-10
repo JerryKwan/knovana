@@ -6,9 +6,18 @@ import type {
   CaptureRequestBody,
   PageSnapshot,
   PendingAction,
+  UploadedCaptureAsset,
 } from '../types/capture';
+import type { AttachmentUploadResponse } from '../types/api';
 
 type ChromeMenuInfo = chrome.contextMenus.OnClickData;
+
+export interface PreparedCaptureUploads {
+  context: ActionContext;
+  mediaLocalPath: string;
+  imagesSection: string;
+  uploadedAssets: UploadedCaptureAsset[];
+}
 
 export function collectPageSnapshot(action?: CaptureAction): PageSnapshot {
   const getMeta = (name: string) =>
@@ -23,6 +32,7 @@ export function collectPageSnapshot(action?: CaptureAction): PageSnapshot {
   let selectedText = '';
   let selectedHtml = '';
   let selectedImages: Array<{ src: string; alt?: string }> = [];
+  type SnapshotContent = Pick<PageSnapshot, 'selectedText' | 'selectedHtml' | 'selectedImages'>;
 
   function resolveAbsoluteUrl(url: string): string {
     try {
@@ -30,6 +40,95 @@ export function collectPageSnapshot(action?: CaptureAction): PageSnapshot {
     } catch {
       return url;
     }
+  }
+
+  function normalizeCapturedImageUrl(url: string): string {
+    const absolute = resolveAbsoluteUrl(url);
+    try {
+      const parsed = new URL(absolute);
+      if (parsed.hostname.endsWith('twimg.com') && parsed.pathname.includes('/media/')) {
+        parsed.searchParams.set('name', 'large');
+      }
+      return parsed.href;
+    } catch {
+      return absolute;
+    }
+  }
+
+  function getSrcsetCandidate(srcset: string): string {
+    const candidates = srcset
+      .split(',')
+      .map((item) => item.trim().split(/\s+/)[0])
+      .filter(Boolean);
+    return candidates[candidates.length - 1] || '';
+  }
+
+  function getBackgroundImageSource(element: Element): string {
+    const inlineBackground =
+      element instanceof HTMLElement
+        ? element.style.backgroundImage || element.style.background
+        : '';
+    const computedBackground =
+      typeof window.getComputedStyle === 'function'
+        ? window.getComputedStyle(element).backgroundImage
+        : '';
+    const match = (inlineBackground || computedBackground).match(/url\((['"]?)(.*?)\1\)/);
+    return match?.[2] || '';
+  }
+
+  function getImageSource(image: Element): string {
+    const htmlImage = image instanceof HTMLImageElement ? image : null;
+    const srcAttr =
+      image.getAttribute('data-src') ||
+      image.getAttribute('data-original-src') ||
+      image.getAttribute('data-original') ||
+      htmlImage?.currentSrc ||
+      getSrcsetCandidate(image.getAttribute('data-srcset') || image.getAttribute('srcset') || '') ||
+      image.getAttribute('src') ||
+      getBackgroundImageSource(image) ||
+      '';
+
+    return srcAttr ? normalizeCapturedImageUrl(srcAttr) : '';
+  }
+
+  function isCapturableImageUrl(src: string): boolean {
+    return src.startsWith('http://') || src.startsWith('https://') || src.startsWith('data:');
+  }
+
+  function toCapturedImage(image: HTMLImageElement): { src: string; alt?: string } | null {
+    const src = getImageSource(image);
+    if (!src || !isCapturableImageUrl(src)) {
+      return null;
+    }
+    return { src, alt: image.alt || undefined };
+  }
+
+  function toCapturedElementImage(element: Element): { src: string; alt?: string } | null {
+    const src = getImageSource(element);
+    if (!src || !isCapturableImageUrl(src)) {
+      return null;
+    }
+    const alt =
+      element instanceof HTMLImageElement
+        ? element.alt
+        : element.getAttribute('aria-label') || element.getAttribute('alt') || undefined;
+    return { src, alt: alt || undefined };
+  }
+
+  function collectImages(root: ParentNode, selector = 'img'): Array<{ src: string; alt?: string }> {
+    const seen = new Set<string>();
+    const images: Array<{ src: string; alt?: string }> = [];
+
+    Array.from(root.querySelectorAll<HTMLImageElement>(selector)).forEach((image) => {
+      const captured = toCapturedImage(image);
+      if (!captured || seen.has(captured.src)) {
+        return;
+      }
+      seen.add(captured.src);
+      images.push(captured);
+    });
+
+    return images;
   }
 
   function extractTextWithNewlines(node: Node): string {
@@ -48,13 +147,9 @@ export function collectPageSnapshot(action?: CaptureAction): PageSnapshot {
     }
 
     if (tagName === 'IMG') {
-      const srcAttr =
-        element.getAttribute('data-src') ||
-        element.getAttribute('data-original-src') ||
-        element.getAttribute('src') ||
-        '';
-      if (srcAttr) {
-        return `\n\n![image](${resolveAbsoluteUrl(srcAttr)})\n\n`;
+      const src = getImageSource(element);
+      if (src && isCapturableImageUrl(src)) {
+        return `\n\n![image](${src})\n\n`;
       }
       return '';
     }
@@ -96,12 +191,154 @@ export function collectPageSnapshot(action?: CaptureAction): PageSnapshot {
       .trim();
   }
 
-  if (action === 'extract-page') {
-    // Simple page text extraction - remove obvious clutter
+  function extractPlainTextWithBreaks(node: Node): string {
+    if (node.nodeType === Node.TEXT_NODE) {
+      return node.nodeValue || '';
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) {
+      return '';
+    }
+
+    const element = node as Element;
+    const tagName = element.tagName.toUpperCase();
+    if (tagName === 'BR') {
+      return '\n';
+    }
+    if (tagName === 'IMG') {
+      return element.getAttribute('alt') || '';
+    }
+
+    let text = '';
+    for (let i = 0; i < element.childNodes.length; i++) {
+      text += extractPlainTextWithBreaks(element.childNodes[i]);
+    }
+    if (['P', 'DIV', 'LI', 'BLOCKQUOTE'].includes(tagName)) {
+      const trimmed = text.trim();
+      return trimmed ? `\n${trimmed}\n` : '';
+    }
+    return text;
+  }
+
+  function getXContentId(url: URL): string | null {
+    return url.pathname.match(/\/(?:status(?:es)?|article)\/(\d+)/)?.[1] ?? null;
+  }
+
+  function isXContentPage(url: URL): boolean {
+    const host = url.hostname.toLowerCase();
+    const isXHost =
+      host === 'x.com' ||
+      host.endsWith('.x.com') ||
+      host === 'twitter.com' ||
+      host.endsWith('.twitter.com');
+    const hasTweetDom = Boolean(document.querySelector('article[data-testid="tweet"]'));
+    return Boolean(getXContentId(url) && (isXHost || hasTweetDom));
+  }
+
+  function articleLinksToXContent(article: Element, contentId: string): boolean {
+    return Array.from(
+      article.querySelectorAll<HTMLAnchorElement>(
+        'a[href*="/status/"], a[href*="/statuses/"], a[href*="/article/"]',
+      ),
+    ).some((link) => {
+      const href = link.getAttribute('href') || link.href || '';
+      return (
+        href.includes(`/status/${contentId}`) ||
+        href.includes(`/statuses/${contentId}`) ||
+        href.includes(`/article/${contentId}`)
+      );
+    });
+  }
+
+  function extractXContentPage(url: URL): SnapshotContent | null {
+    const contentId = getXContentId(url);
+    if (!contentId) {
+      return null;
+    }
+
+    const scope =
+      document.querySelector('[data-testid="primaryColumn"]') ||
+      document.querySelector('main') ||
+      document.body;
+    const articles = Array.from(
+      scope.querySelectorAll<HTMLElement>('article[data-testid="tweet"], article'),
+    );
+    const targetArticle =
+      articles.find((article) => articleLinksToXContent(article, contentId)) || articles[0];
+    if (!targetArticle) {
+      return null;
+    }
+
+    const textSeen = new Set<string>();
+    const textBlocks = Array.from(
+      targetArticle.querySelectorAll<HTMLElement>('[data-testid="tweetText"]'),
+    )
+      .filter((element) => {
+        const closestTweetArticle = element.closest('article[data-testid="tweet"]');
+        return !closestTweetArticle || closestTweetArticle === targetArticle;
+      })
+      .map((element) => cleanNewlines(extractPlainTextWithBreaks(element)))
+      .filter((text) => {
+        if (!text || textSeen.has(text)) {
+          return false;
+        }
+        textSeen.add(text);
+        return true;
+      });
+
+    if (textBlocks.length === 0) {
+      const fallbackText = cleanNewlines(extractPlainTextWithBreaks(targetArticle));
+      if (fallbackText) {
+        textBlocks.push(fallbackText);
+      }
+    }
+
+    const xImages: Array<{ src: string; alt?: string }> = [];
+    const imageSelector = [
+      '[data-testid="tweetPhoto"]',
+      '[data-testid="tweetPhoto"] img',
+      '[data-testid="tweetPhoto"] [style*="pbs.twimg.com/media/"]',
+      'a[href*="/photo/"] img',
+      'a[href*="/media/"] img',
+      'a[href*="/media/"] [style*="pbs.twimg.com/media/"]',
+      'img[src*="pbs.twimg.com/media/"]',
+      '[style*="pbs.twimg.com/media/"]',
+    ].join(',');
+    Array.from(targetArticle.querySelectorAll<Element>(imageSelector)).forEach((image) => {
+      const closestTweetArticle = image.closest('article[data-testid="tweet"]');
+      if (closestTweetArticle && closestTweetArticle !== targetArticle) {
+        return;
+      }
+      const captured = toCapturedElementImage(image);
+      if (!captured) {
+        return;
+      }
+      const existingImage = xImages.find((item) => item.src === captured.src);
+      if (existingImage) {
+        if (!existingImage.alt && captured.alt) {
+          existingImage.alt = captured.alt;
+        }
+        return;
+      }
+      xImages.push(captured);
+    });
+
+    const imageMarkdown = xImages.map((image) => `![image](${image.src})`);
+    const selectedText = cleanNewlines([...textBlocks, ...imageMarkdown].join('\n\n'));
+    if (!selectedText && xImages.length === 0) {
+      return null;
+    }
+
+    return {
+      selectedHtml: targetArticle.innerHTML || '',
+      selectedText,
+      selectedImages: xImages,
+    };
+  }
+
+  function extractGenericPageContent(): SnapshotContent {
     const docClone = document.cloneNode(true) as Document;
     const body = docClone.body || docClone.documentElement;
 
-    // 1. Remove tags that are strictly noise
     const noiseTags = [
       'script',
       'style',
@@ -121,11 +358,11 @@ export function collectPageSnapshot(action?: CaptureAction): PageSnapshot {
     ];
     body.querySelectorAll(noiseTags.join(',')).forEach((el) => el.remove());
 
-    // 2. Remove elements matching class/id noise patterns
     const noisePattern =
-      /nav|menu|footer|header|aside|sidebar|comment|comments|ad|ads|social|share|sharing|related|recommend|recommendation|breadcrumb|breadcrumbs|pagination|banner|popup|widget/i;
+      /(^|[\s_-])(nav|menu|footer|header|aside|sidebar|comments?|ads?|advert|advertisement|sponsored?|social|share|sharing|related|recommend(?:ation)?|breadcrumbs?|pagination|banner|popup|widget)(?=$|[\s_-])/i;
     body.querySelectorAll('*').forEach((el) => {
-      if (noisePattern.test(el.className || '') || noisePattern.test(el.id || '')) {
+      const descriptor = `${el.id || ''} ${el.getAttribute('class') || ''}`;
+      if (noisePattern.test(descriptor)) {
         const textLen = el.textContent?.trim().length || 0;
         if (textLen < 200) {
           el.remove();
@@ -133,7 +370,6 @@ export function collectPageSnapshot(action?: CaptureAction): PageSnapshot {
       }
     });
 
-    // 3. Find target content container (article, main, #content, or fall back to body)
     const targetElement =
       body.querySelector('article') ||
       body.querySelector('main') ||
@@ -141,25 +377,30 @@ export function collectPageSnapshot(action?: CaptureAction): PageSnapshot {
       body.querySelector('#content') ||
       body;
 
-    selectedHtml = targetElement.innerHTML || '';
-    selectedText = cleanNewlines(extractTextWithNewlines(targetElement));
-    selectedImages = Array.from(targetElement.querySelectorAll('img'))
-      .map((img) => {
-        const srcAttr =
-          img.getAttribute('data-src') ||
-          img.getAttribute('data-original-src') ||
-          img.getAttribute('src') ||
-          '';
-        const src = resolveAbsoluteUrl(srcAttr);
-        return { src, alt: img.alt || undefined };
-      })
-      .filter(
-        (img) =>
-          img.src &&
-          (img.src.startsWith('http://') ||
-            img.src.startsWith('https://') ||
-            img.src.startsWith('data:')),
-      );
+    return {
+      selectedHtml: targetElement.innerHTML || '',
+      selectedText: cleanNewlines(extractTextWithNewlines(targetElement)),
+      selectedImages: collectImages(targetElement),
+    };
+  }
+
+  function extractSiteSpecificPageContent(): SnapshotContent | null {
+    try {
+      const url = new URL(window.location.href);
+      if (isXContentPage(url)) {
+        return extractXContentPage(url);
+      }
+    } catch {
+      return null;
+    }
+    return null;
+  }
+
+  if (action === 'extract-page') {
+    const extracted = extractSiteSpecificPageContent() || extractGenericPageContent();
+    selectedHtml = extracted.selectedHtml || '';
+    selectedText = extracted.selectedText || '';
+    selectedImages = extracted.selectedImages;
   } else if (selection && !selection.isCollapsed && selection.rangeCount > 0) {
     const container = document.createElement('div');
     for (let index = 0; index < selection.rangeCount; index += 1) {
@@ -167,23 +408,7 @@ export function collectPageSnapshot(action?: CaptureAction): PageSnapshot {
     }
     selectedHtml = container.innerHTML;
     selectedText = cleanNewlines(extractTextWithNewlines(container)) || selection.toString().trim();
-    selectedImages = Array.from(container.querySelectorAll('img'))
-      .map((image) => {
-        const srcAttr =
-          image.getAttribute('data-src') ||
-          image.getAttribute('data-original-src') ||
-          image.getAttribute('src') ||
-          '';
-        const src = resolveAbsoluteUrl(srcAttr);
-        return { src, alt: image.alt || undefined };
-      })
-      .filter(
-        (image) =>
-          image.src &&
-          (image.src.startsWith('http://') ||
-            image.src.startsWith('https://') ||
-            image.src.startsWith('data:')),
-      );
+    selectedImages = collectImages(container);
   }
 
   return {
@@ -230,6 +455,59 @@ export function createPendingAction(
   };
 }
 
+export async function prepareCaptureUploads(
+  action: CaptureAction,
+  context: ActionContext,
+): Promise<PreparedCaptureUploads> {
+  const uploadedAssets = [...(context.uploadedAssets ?? [])];
+  let mediaLocalPath = context.mediaLocalPath || '';
+  let selectedText = context.selectedText || '';
+  let selectedHtml = context.selectedHtml || '';
+
+  if (action === 'save-media' && context.mediaUrl && !mediaLocalPath) {
+    const uploaded = await downloadAndUploadAsset(context.mediaUrl);
+    const asset = toUploadedCaptureAsset('primary-media', context.mediaUrl, uploaded);
+    uploadedAssets.push(asset);
+    mediaLocalPath = asset.path;
+  }
+
+  if (context.selectedImages && context.selectedImages.length > 0) {
+    const uploadedImages = await Promise.all(
+      context.selectedImages.map(async (img) => {
+        const uploaded = await downloadAndUploadAsset(img.src);
+        const asset = toUploadedCaptureAsset('content-image', img.src, uploaded);
+        return { original: img.src, asset };
+      }),
+    );
+
+    for (const item of uploadedImages) {
+      uploadedAssets.push(item.asset);
+      selectedHtml = replaceMediaReference(selectedHtml, item.original, item.asset.path);
+      selectedText = replaceMediaReference(selectedText, item.original, item.asset.path);
+    }
+  }
+
+  const imageAssets = uploadedAssets.filter((asset) => asset.kind === 'content-image');
+  const imagesSection =
+    imageAssets.length > 0
+      ? '\n\n【捕获的媒体文件列表】:\n' +
+        imageAssets.map((asset) => `- ![media](${asset.path})`).join('\n')
+      : '';
+
+  return {
+    context: {
+      ...context,
+      mediaLocalPath,
+      selectedHtml,
+      selectedText,
+      uploadedAssets,
+    },
+    mediaLocalPath,
+    imagesSection,
+    uploadedAssets,
+  };
+}
+
 export function buildCaptureRequest(
   action: CaptureAction,
   context: ActionContext,
@@ -269,52 +547,80 @@ function toCaptureContent(action: CaptureAction, context: ActionContext): string
   return context.selectedText || context.selectedHtml || context.description || context.pageUrl;
 }
 
-export async function downloadAndUploadAsset(
-  url: string,
-): Promise<{ filename: string; url: string } | null> {
-  try {
-    const response = await fetch(url);
-    if (!response.ok) throw new Error(`Fetch failed: ${response.status}`);
-    const blob = await response.blob();
-
-    // Keep the URL filename as a hint; the backend applies the final safety and conflict rules.
-    let filename = filenameFromUrl(url) || 'file';
-    if (!filename.includes('.')) {
-      const mime = blob.type;
-      let ext = '.png';
-      if (mime === 'image/jpeg') ext = '.jpg';
-      else if (mime === 'image/gif') ext = '.gif';
-      else if (mime === 'image/webp') ext = '.webp';
-      else if (mime === 'audio/mpeg') ext = '.mp3';
-      else if (mime === 'audio/wav') ext = '.wav';
-      else if (mime === 'audio/ogg') ext = '.ogg';
-      else if (mime === 'video/mp4') ext = '.mp4';
-      else if (mime === 'video/webm') ext = '.webm';
-      filename = `${filename}${ext}`;
-    }
-
-    const formData = new FormData();
-    formData.append('file', blob, filename);
-
-    const settings = await getSettings();
-    const headers = new Headers();
-    if (settings.token) {
-      headers.set('Authorization', `Bearer ${settings.token}`);
-    }
-
-    const res = await fetch(`${settings.backendUrl}/attachments`, {
-      method: 'POST',
-      headers,
-      body: formData,
-    });
-    if (!res.ok) {
-      throw new Error(`Upload failed: ${res.statusText}`);
-    }
-    return (await res.json()) as { filename: string; url: string };
-  } catch (error) {
-    console.error('Failed to download and upload asset:', url, error);
-    return null;
+export async function downloadAndUploadAsset(url: string): Promise<AttachmentUploadResponse> {
+  const response = await fetch(url, { credentials: 'include' });
+  if (!response.ok) {
+    throw new Error(`下载媒体失败 (${response.status}): ${url}`);
   }
+  const blob = await response.blob();
+
+  // Keep the URL filename as a hint; the backend applies the final safety and conflict rules.
+  let filename = filenameFromUrl(url) || 'file';
+  if (!filename.includes('.')) {
+    const mime = blob.type;
+    let ext = '.png';
+    if (mime === 'image/jpeg') ext = '.jpg';
+    else if (mime === 'image/gif') ext = '.gif';
+    else if (mime === 'image/webp') ext = '.webp';
+    else if (mime === 'audio/mpeg') ext = '.mp3';
+    else if (mime === 'audio/wav') ext = '.wav';
+    else if (mime === 'audio/ogg') ext = '.ogg';
+    else if (mime === 'video/mp4') ext = '.mp4';
+    else if (mime === 'video/webm') ext = '.webm';
+    filename = `${filename}${ext}`;
+  }
+
+  const formData = new FormData();
+  formData.append('file', blob, filename);
+
+  const settings = await getSettings();
+  const headers = new Headers();
+  if (settings.token) {
+    headers.set('Authorization', `Bearer ${settings.token}`);
+  }
+
+  const res = await fetch(`${settings.backendUrl}/attachments`, {
+    method: 'POST',
+    headers,
+    body: formData,
+  });
+  if (!res.ok) {
+    throw new Error(`上传媒体失败 (${res.status} ${res.statusText}): ${url}`);
+  }
+
+  const result = (await res.json()) as AttachmentUploadResponse;
+  if (!result.filename || !result.path) {
+    throw new Error(`上传媒体失败: 后端未返回真实附件路径 (${url})`);
+  }
+  return result;
+}
+
+function toUploadedCaptureAsset(
+  kind: UploadedCaptureAsset['kind'],
+  sourceUrl: string,
+  uploaded: AttachmentUploadResponse,
+): UploadedCaptureAsset {
+  return {
+    kind,
+    sourceUrl,
+    filename: uploaded.filename,
+    path: uploaded.path,
+    url: uploaded.url,
+    size: uploaded.size,
+    mimeType: uploaded.mime_type,
+  };
+}
+
+function replaceMediaReference(content: string, sourceUrl: string, localPath: string): string {
+  if (!content || !sourceUrl) return content;
+  let result = content.replaceAll(sourceUrl, localPath);
+  result = result.replaceAll(sourceUrl.replaceAll('&', '&amp;'), localPath);
+  try {
+    result = result.replaceAll(encodeURI(sourceUrl), localPath);
+  } catch {
+    // Ignore malformed URL fragments from page markup.
+  }
+  return result;
 }
 
 function filenameFromUrl(url: string): string {

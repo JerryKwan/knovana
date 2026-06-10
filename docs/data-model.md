@@ -311,10 +311,14 @@ claude-agent-sdk-typescript Agent 接收指令：
    附件图片: {image_url}"
        │
        ▼
+Chrome 扩展预处理媒体:
+  1. 下载网页媒体并上传到 /api/v1/attachments
+  2. 使用后端返回的真实 attachments/... 路径替换正文里的原媒体 URL
+       │
+       ▼
 Agent 自主决策，调用 MCP Tools:
-  1. 下载图片 → manage_attachment("download", image_url)
-  2. 整理内容 → 生成标题、标签、Markdown 正文
-  3. 保存 → save_to_kb(title, content, tags, attachments)
+  1. 整理内容 → 生成标题、标签、Markdown 正文
+  2. 保存 → save_to_kb(title, content, tags, attachments)
        │
        ▼
 文件系统生成:

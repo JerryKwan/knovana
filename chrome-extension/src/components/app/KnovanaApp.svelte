@@ -18,7 +18,7 @@
   import HistoryView from '../knowledge/HistoryView.svelte';
   import SettingsPanel from '../settings/SettingsPanel.svelte';
   import { uploadAttachment } from '../../services/api';
-  import { downloadAndUploadAsset } from '../../services/capture';
+  import { prepareCaptureUploads } from '../../services/capture';
   import {
     generateCapturePrompt,
     generateKnowledgeEntryPrompt,
@@ -41,7 +41,7 @@
   import type { AppRuntimeState, PopoutBounds } from '../../services/storage';
   import type { ApiStreamEvent } from '../../types/api';
   import type { ChatAttachment, ChatMessage } from '../../types/chat';
-  import type { PendingAction } from '../../types/capture';
+  import type { PendingAction, UploadedCaptureAsset } from '../../types/capture';
   import type { RuntimeMessage, SurfaceRegistrationResponse } from '../../types/message';
   import type { ExtensionSettings, ExtensionSurface } from '../../types/settings';
 
@@ -83,6 +83,7 @@
   let runtimePersistSnapshot: unknown[] | null = null;
   let targetBrowserWindowId = getTargetWindowIdFromUrl();
   let popoutBoundsTimer: ReturnType<typeof setTimeout> | undefined;
+  let pendingActionConsumeQueued = false;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const tabs: Array<{ id: Tab; label: string; icon: any }> = [
@@ -158,10 +159,7 @@
       await restoreCurrentSession();
     }
 
-    const pending = await sendRuntimeMessage<PendingAction | null>({
-      type: 'CONSUME_PENDING_ACTION',
-      payload: { surfaceId },
-    }).catch(() => null);
+    const pending = await consumePendingActionFromBackground();
     if (pending) {
       void receivePendingAction(pending);
     }
@@ -311,8 +309,33 @@
       void receivePendingAction(message.payload);
       return;
     }
+    if (message.type === 'PENDING_ACTION_AVAILABLE') {
+      void consumeAvailablePendingAction();
+      return;
+    }
     if (message.type !== 'STREAM_EVENT') return;
     handleStreamEvent(message.payload);
+  }
+
+  async function consumeAvailablePendingAction() {
+    if (pendingActionConsumeQueued) return;
+
+    pendingActionConsumeQueued = true;
+    try {
+      const action = await consumePendingActionFromBackground();
+      if (action) {
+        await receivePendingAction(action);
+      }
+    } finally {
+      pendingActionConsumeQueued = false;
+    }
+  }
+
+  async function consumePendingActionFromBackground(): Promise<PendingAction | null> {
+    return sendRuntimeMessage<PendingAction | null>({
+      type: 'CONSUME_PENDING_ACTION',
+      payload: { surfaceId },
+    }).catch(() => null);
   }
 
   async function receivePendingAction(action: PendingAction) {
@@ -323,6 +346,10 @@
     currentSessionId = undefined;
     chatInputDraft = '';
     chatInputDraftTouched = true;
+    activeQuickAction = null;
+    quickActionProcessing = false;
+    settingsOpen = false;
+    composerAttachment = null;
     clearCapture();
     await Promise.all([clearCurrentChatSessionId(), clearChatInputDraft(), clearAppRuntimeState()]);
 
@@ -346,61 +373,32 @@
     try {
       if (pendingAction.customPrompt) {
         const prompt = pendingAction.customPrompt;
+        const attachments = chatAttachmentsFromUploadedAssets(
+          pendingAction.context.uploadedAssets ?? [],
+        );
+        assertPromptAttachmentRefsConfirmed(prompt, attachments);
         clearCapture();
-        await sendChat(prompt, undefined, 'knowledge_entry');
+        await sendChat(prompt, undefined, 'knowledge_entry', attachments);
         return;
       }
 
       const action = pendingAction.action;
       const context = pendingAction.context;
 
-      let mediaLocalPath = '';
-      if (action === 'save-media' && context.mediaUrl) {
-        const res = await downloadAndUploadAsset(context.mediaUrl);
-        if (res) {
-          mediaLocalPath = `attachments/${res.filename}`;
-        }
-      }
-
-      let selectedText = context.selectedText || '';
-      let selectedHtml = context.selectedHtml || '';
-      let imagesSection = '';
-      if (context.selectedImages && context.selectedImages.length > 0) {
-        const uploadPromises = context.selectedImages.map(async (img) => {
-          const res = await downloadAndUploadAsset(img.src);
-          return { original: img.src, local: res ? `attachments/${res.filename}` : null };
-        });
-        const uploadedImages = await Promise.all(uploadPromises);
-
-        const localRefs = uploadedImages.filter((item) => item.local !== null);
-        if (localRefs.length > 0) {
-          imagesSection =
-            '\n\n【捕获的媒体文件列表】:\n' +
-            localRefs.map((item) => `- ![media](${item.local})`).join('\n');
-        }
-
-        uploadedImages.forEach((img) => {
-          if (img.local) {
-            selectedHtml = selectedHtml.replaceAll(img.original, img.local);
-            selectedText = selectedText.replaceAll(img.original, img.local);
-          }
-        });
-      }
+      const prepared = await prepareCaptureUploads(action, context);
 
       const prompt = generateCapturePrompt(
         action,
-        {
-          ...context,
-          selectedText,
-          selectedHtml,
-        },
-        mediaLocalPath,
-        imagesSection,
+        prepared.context,
+        prepared.mediaLocalPath,
+        prepared.imagesSection,
       );
 
       if (prompt) {
+        const attachments = chatAttachmentsFromUploadedAssets(prepared.uploadedAssets);
+        assertPromptAttachmentRefsConfirmed(prompt, attachments);
         clearCapture();
-        await sendChat(prompt, undefined, 'knowledge_entry');
+        await sendChat(prompt, undefined, 'knowledge_entry', attachments);
       }
     } catch (err) {
       captureError = err instanceof Error ? err.message : String(err);
@@ -412,6 +410,7 @@
     message: string,
     attachment?: ChatAttachment,
     intent: 'chat' | 'knowledge_entry' = 'chat',
+    attachments: ChatAttachment[] = [],
   ) {
     const userMessage: ChatMessage = {
       id: crypto.randomUUID(),
@@ -443,8 +442,53 @@
         session_id: currentSessionId,
         intent,
         attachment,
+        attachments: attachments.length > 0 ? attachments : undefined,
       },
     });
+  }
+
+  function chatAttachmentsFromUploadedAssets(assets: UploadedCaptureAsset[]): ChatAttachment[] {
+    return assets.map((asset) => ({
+      name: asset.filename,
+      size: asset.size,
+      path: asset.path,
+    }));
+  }
+
+  function assertPromptAttachmentRefsConfirmed(prompt: string, attachments: ChatAttachment[]) {
+    const confirmedPaths = new Set(attachments.map((attachment) => attachment.path));
+    const unknownRefs = extractAttachmentRefs(prompt).filter(
+      (ref) => !isPlaceholderAttachmentRef(ref) && !confirmedPaths.has(ref),
+    );
+    if (unknownRefs.length > 0) {
+      throw new Error(`捕获提示词引用了未确认上传的附件: ${unknownRefs.join(', ')}`);
+    }
+  }
+
+  function extractAttachmentRefs(value: string): string[] {
+    const refs: string[] = [];
+    const regex = /attachments\/[^)\]\s"'<>`]+/g;
+    let match: RegExpExecArray | null;
+    while ((match = regex.exec(value)) !== null) {
+      const ref = decodeAttachmentRef(match[0]);
+      if (!refs.includes(ref)) {
+        refs.push(ref);
+      }
+    }
+    return refs;
+  }
+
+  function isPlaceholderAttachmentRef(value: string): boolean {
+    const filename = value.slice('attachments/'.length).trim();
+    return filename === '...' || filename === '…';
+  }
+
+  function decodeAttachmentRef(value: string): string {
+    try {
+      return decodeURIComponent(value);
+    } catch {
+      return value;
+    }
   }
 
   async function stopChat() {
@@ -759,7 +803,7 @@
       composerAttachment = {
         name: file.name,
         size: file.size,
-        path: `attachments/${result.filename}`,
+        path: result.path,
       };
     } catch (err) {
       alert(`上传失败: ${err instanceof Error ? err.message : String(err)}`);
@@ -1071,6 +1115,24 @@
                 </div>
               </div>
             {:else}
+              {#if captureRunning || captureError}
+                <div class="capture-status" role={captureError ? 'alert' : 'status'}>
+                  <div class="capture-status__body">
+                    <strong>{captureError ? '捕获内容发送失败' : '正在发送捕获内容...'}</strong>
+                    {#if captureError}
+                      <span>{captureError}</span>
+                    {:else}
+                      <span>已收到预览页提交，正在创建整理对话。</span>
+                    {/if}
+                  </div>
+                  {#if captureError}
+                    <div class="capture-status__actions">
+                      <button type="button" onclick={() => void runCapture()}>重试</button>
+                      <button type="button" onclick={clearCapture}>清除</button>
+                    </div>
+                  {/if}
+                </div>
+              {/if}
               <ChatView {messages} isStreaming={chatRunning} onRegenerate={handleRegenerate} />
             {/if}
           {:else if activeTab === 'knowledge'}
@@ -1086,7 +1148,7 @@
 
         {#if activeTab === 'chat' && !activeQuickAction}
           <InputBar
-            disabled={chatRunning || restoringSession}
+            disabled={chatRunning || captureRunning || restoringSession}
             onSubmit={(val, att) => sendChat(val, att)}
             onStop={stopChat}
             value={chatInputDraft}
@@ -1310,6 +1372,68 @@
     color: var(--kn-text-muted);
     font-size: 13px;
     font-weight: 600;
+  }
+
+  .capture-status {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin: 10px 12px 0;
+    padding: 10px 12px;
+    border: 1px solid var(--kn-border);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--kn-bg-raised) 86%, var(--kn-primary-soft));
+    color: var(--kn-text);
+    flex-shrink: 0;
+  }
+
+  .capture-status[role='alert'] {
+    border-color: color-mix(in srgb, var(--kn-danger) 36%, var(--kn-border));
+    background: color-mix(in srgb, var(--kn-danger) 7%, var(--kn-bg-raised));
+  }
+
+  .capture-status__body {
+    min-width: 0;
+    display: grid;
+    gap: 3px;
+    font-size: 12px;
+    line-height: 1.45;
+  }
+
+  .capture-status__body strong {
+    font-size: 12px;
+    font-weight: 650;
+  }
+
+  .capture-status__body span {
+    overflow-wrap: anywhere;
+    color: var(--kn-text-muted);
+  }
+
+  .capture-status__actions {
+    display: flex;
+    flex: 0 0 auto;
+    gap: 6px;
+  }
+
+  .capture-status__actions button {
+    height: 26px;
+    padding: 0 9px;
+    border-radius: 6px;
+    border: 1px solid var(--kn-border);
+    background: var(--kn-bg-raised);
+    color: var(--kn-text);
+    font-size: 12px;
+    cursor: pointer;
+    transition:
+      background 150ms ease,
+      border-color 150ms ease;
+  }
+
+  .capture-status__actions button:hover {
+    background: var(--kn-bg-subtle);
+    border-color: var(--kn-border-strong);
   }
 
   /* ═══════════════════════════════════════════════════════════════

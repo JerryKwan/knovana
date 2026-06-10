@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { generateKnowledgeEntryPrompt } from './capture-prompt';
+import { generateCapturePrompt, generateKnowledgeEntryPrompt } from './capture-prompt';
 
 describe('knowledge entry prompt', () => {
   it('builds an editable knowledge-entry prompt without capture-source form fields', () => {
@@ -18,5 +18,24 @@ describe('knowledge entry prompt', () => {
 
     expect(prompt).toContain('请尽量保留资料原文');
     expect(prompt).toContain('不要改写核心表述');
+  });
+
+  it('uses the extension-uploaded local path for media captures instead of the source media URL', () => {
+    const prompt = generateCapturePrompt(
+      'save-media',
+      {
+        pageTitle: 'Media Page',
+        pageUrl: 'https://example.com/page',
+        mediaUrl: 'https://cdn.example.com/private/image.png',
+        selectedImages: [],
+      },
+      'attachments/image.png',
+      '',
+    );
+
+    expect(prompt).toContain('浏览器扩展已下载并上传媒体文件：attachments/image.png');
+    expect(prompt).toContain('![media](attachments/image.png)');
+    expect(prompt).toContain('不要调用后端或 Agent 工具从网页媒体 URL 再次下载文件');
+    expect(prompt).not.toContain('https://cdn.example.com/private/image.png');
   });
 });

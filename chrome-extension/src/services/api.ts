@@ -1,5 +1,6 @@
 import { getSettings } from './storage';
 import { readSseStream, type ParsedSseData } from './sse';
+import type { AttachmentUploadResponse } from '../types/api';
 
 export class ApiError extends Error {
   constructor(
@@ -56,7 +57,7 @@ async function toApiError(response: Response): Promise<ApiError> {
   return new ApiError(text || `Request failed with ${response.status}`, response.status);
 }
 
-export async function uploadAttachment(file: File): Promise<{ filename: string; url: string }> {
+export async function uploadAttachment(file: File): Promise<AttachmentUploadResponse> {
   const settings = await getSettings();
   const formData = new FormData();
   formData.append('file', file);
@@ -74,5 +75,9 @@ export async function uploadAttachment(file: File): Promise<{ filename: string; 
   if (!res.ok) {
     throw new Error(`Upload failed: ${res.statusText}`);
   }
-  return (await res.json()) as { filename: string; url: string };
+  const result = (await res.json()) as AttachmentUploadResponse;
+  if (!result.path) {
+    throw new Error('Upload failed: backend did not return an attachment path');
+  }
+  return result;
 }

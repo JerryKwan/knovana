@@ -719,6 +719,8 @@ function extractText(msg: SDKMessage): string[] {
 
 附件读取必须通过 `read_attachment` 形成受限预览，而不是让 Agent 直接全文解析上传文件。该工具对文本附件限制返回字符数；对 PDF、Word、PowerPoint、Excel 等文档附件使用 LiteParse 解析时固定只取前 3 页，用于知识条目摘要整理。限制只作用于暴露给 Agent 的文本预览，原始附件仍由 `save_to_kb` 完整归档到条目的 `assets/` 目录。
 
+上传接口返回的 `path` 是后续流程唯一可信的临时附件路径，例如 `attachments/image-2.jpg`。客户端不得根据原始 URL 或原始文件名自行推断路径，因为后端会按真实文件系统冲突追加数字后缀。`ChatService` 在启动 Agent 前必须校验 `attachment` / `attachments[]` 中每个 `attachments/...` 文件都存在于当前用户的临时附件目录；`save_to_kb` 保存前也必须校验声明附件存在，避免生成断链知识条目。若 `save_to_kb` 已经把临时附件移动到目标条目的 `assets/`，后续对同一文件的 `attachment_manager import` 应视为幂等成功。
+
 ```ts
 // src/agent/tools/index.ts
 

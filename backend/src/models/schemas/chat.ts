@@ -1,5 +1,11 @@
 import { z } from "@hono/zod-openapi";
 
+const ChatAttachmentSchema = z.object({
+  name: z.string().openapi({ description: "附件文件名" }),
+  size: z.number().optional().openapi({ description: "附件大小" }),
+  path: z.string().openapi({ description: "附件在存储中的相对路径" }),
+});
+
 export const ChatRequestSchema = z.object({
   message: z.string().openapi({
     description: "用户当前输入的消息内容",
@@ -14,14 +20,13 @@ export const ChatRequestSchema = z.object({
       "本次消息意图。knowledge_entry 表示应将上传附件作为知识条目附件归档。",
     example: "knowledge_entry",
   }),
-  attachment: z
-    .object({
-      name: z.string().openapi({ description: "附件文件名" }),
-      size: z.number().optional().openapi({ description: "附件大小" }),
-      path: z.string().openapi({ description: "附件在存储中的相对路径" }),
-    })
+  attachment: ChatAttachmentSchema.optional().openapi({
+    description: "用户上传的单个附件信息，保留用于兼容旧客户端",
+  }),
+  attachments: z
+    .array(ChatAttachmentSchema)
     .optional()
-    .openapi({ description: "用户上传的附件信息" }),
+    .openapi({ description: "用户上传或右键捕获并已上传的附件列表" }),
 });
 
 export const CreateSessionRequestSchema = z.object({

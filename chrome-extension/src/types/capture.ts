@@ -7,6 +7,18 @@ export interface CapturedImage {
   alt?: string;
 }
 
+export type UploadedCaptureAssetKind = 'primary-media' | 'content-image';
+
+export interface UploadedCaptureAsset {
+  kind: UploadedCaptureAssetKind;
+  sourceUrl: string;
+  filename: string;
+  path: string;
+  url: string;
+  size?: number;
+  mimeType?: string;
+}
+
 export interface PageSnapshot {
   pageUrl: string;
   pageTitle: string;
@@ -23,7 +35,9 @@ export interface PageSnapshot {
 export interface ActionContext extends PageSnapshot {
   action: CaptureAction;
   mediaUrl?: string;
+  mediaLocalPath?: string;
   linkUrl?: string;
+  uploadedAssets?: UploadedCaptureAsset[];
 }
 
 export interface PendingAction {
