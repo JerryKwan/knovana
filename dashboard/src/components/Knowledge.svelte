@@ -35,6 +35,25 @@
   let tags = $state<Array<{ name: string; count: number }>>([]);
   let loadingList = $state(false);
   
+  // Create modal states
+  let showCreateModal = $state(false);
+  let newNoteTitle = $state("");
+  let newNoteCategory = $state("inbox");
+  let newNoteSubCategory = $state("");
+  let creatingNote = $state(false);
+
+  // Edit states
+  let isEditMode = $state(false);
+  let editTitle = $state("");
+  let editContent = $state("");
+  let editTags = $state<string[]>([]);
+  let editSourceUrl = $state("");
+  let editAttachments = $state<any[]>([]);
+  let savingNote = $state(false);
+  let editorView = $state<"edit" | "split" | "preview">("split");
+  let textareaRef = $state<HTMLTextAreaElement | null>(null);
+  let uploadingAttachment = $state(false);
+  
   // Filters
   let searchVal = $state("");
   let selectedCategory = $state<string>("all");
@@ -159,10 +178,11 @@
     }
   }
 
-  // Cancel deletion state when selecting a different note
+  // Cancel deletion state and editing state when selecting a different note
   $effect(() => {
     if (selectedId) {
       deleteConfirmActive = false;
+      isEditMode = false;
       if (deleteTimeout) {
         clearTimeout(deleteTimeout);
         deleteTimeout = null;
@@ -176,6 +196,215 @@
     selectedTag = null; // clear tag filter when changing category
     loadList();
   }
+
+  // Slugify helper
+  function slugify(text: string): string {
+    return text
+      .toLowerCase()
+      .replace(/[^a-z0-9\u4e00-\u9fa5]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+  }
+
+  // Create note action
+  async function executeCreateNote() {
+    if (!newNoteTitle.trim()) return;
+    creatingNote = true;
+    try {
+      const slug = slugify(newNoteTitle) || "untitled";
+      const now = new Date();
+      const dateStr = now.toISOString().split("T")[0];
+      const timeStr = now.toTimeString().split(" ")[0].replace(/:/g, ""); // HHMMSS
+
+      let folder = newNoteCategory;
+      if (newNoteCategory === "topics") {
+        folder = `topics/${newNoteSubCategory.trim() || "general"}`;
+      }
+
+      const entryId = `${folder}/${dateStr}-${slug}-${timeStr}.md`;
+
+      const res = await request<{ id: string; status: string }>(
+        `/api/v1/knowledge/${encodeURIComponent(entryId)}`,
+        {
+          method: "PUT",
+          body: JSON.stringify({
+            title: newNoteTitle,
+            content: `# ${newNoteTitle}\n\n开始编写您的笔记内容...`,
+            tags: [],
+          }),
+        }
+      );
+
+      if (res.error) {
+        alert(`创建笔记失败: ${res.error.message}`);
+      } else {
+        showCreateModal = false;
+        newNoteTitle = "";
+        newNoteSubCategory = "";
+        await loadList();
+        await selectEntry(entryId);
+        startEditing(); // Auto open editor
+      }
+    } finally {
+      creatingNote = false;
+    }
+  }
+
+  // Start edit mode
+  function startEditing() {
+    if (!selectedEntry) return;
+    editTitle = selectedEntry.title;
+    editContent = selectedEntry.content;
+    editTags = [...selectedEntry.tags];
+    editSourceUrl = selectedEntry.source_url || "";
+    editAttachments = [...(selectedEntry.attachments || [])];
+    isEditMode = true;
+    editorView = "split";
+  }
+
+  // Save edit mode
+  async function saveEditing() {
+    if (!selectedEntry) return;
+    savingNote = true;
+    try {
+      const res = await request<{ status: string }>(
+        `/api/v1/knowledge/${encodeURIComponent(selectedEntry.id)}`,
+        {
+          method: "PUT",
+          body: JSON.stringify({
+            title: editTitle,
+            content: editContent,
+            tags: editTags,
+            source: editSourceUrl,
+            attachments: editAttachments,
+          }),
+        }
+      );
+
+      if (res.error) {
+        alert(`保存失败: ${res.error.message}`);
+      } else {
+        isEditMode = false;
+        await loadList();
+        await selectEntry(selectedEntry.id);
+      }
+    } finally {
+      savingNote = false;
+    }
+  }
+
+  // Cancel edit mode
+  function cancelEditing() {
+    isEditMode = false;
+  }
+
+  // Handle uploading attachments
+  async function handleUploadAttachment(event: Event) {
+    const input = event.target as HTMLInputElement;
+    if (!input.files || input.files.length === 0) return;
+    const file = input.files[0];
+
+    uploadingAttachment = true;
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const token = getToken();
+      const headers = new Headers();
+      if (token) {
+        headers.set("Authorization", `Bearer ${token}`);
+      }
+
+      const res = await fetch(getApiUrl("/api/v1/attachments"), {
+        method: "POST",
+        headers,
+        body: formData,
+      });
+
+      if (!res.ok) {
+        throw new Error(`Upload failed with status ${res.status}`);
+      }
+
+      const result = await res.json();
+      if (result.filename) {
+        editAttachments = [
+          ...editAttachments,
+          {
+            name: result.filename,
+            size: result.size,
+            mime_type: result.mime_type,
+            description: "",
+          },
+        ];
+      }
+    } catch (err: any) {
+      alert(`上传附件失败: ${err.message}`);
+    } finally {
+      uploadingAttachment = false;
+      input.value = "";
+    }
+  }
+
+  // Insert attachment Markdown code
+  function insertAttachment(att: any) {
+    if (!textareaRef) return;
+    const textarea = textareaRef;
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const text = textarea.value;
+
+    const isImg = ["png", "jpg", "jpeg", "gif", "webp", "svg"].includes(
+      att.name.split(".").pop()?.toLowerCase() || ""
+    );
+    const refText = isImg
+      ? `![${att.name}](attachments/${att.name})`
+      : `[${att.name}](attachments/${att.name})`;
+
+    editContent = text.substring(0, start) + refText + text.substring(end);
+
+    setTimeout(() => {
+      textarea.focus();
+      textarea.setSelectionRange(start + refText.length, start + refText.length);
+    }, 0);
+  }
+
+  // Remove attachment link
+  function removeAttachment(attName: string) {
+    editAttachments = editAttachments.filter((a) => a.name !== attName);
+  }
+
+  // Compile real-time markdown editor preview with temporary upload support
+  const compiledEditPreview = $derived(() => {
+    if (!selectedEntry) return "";
+    const rawMarkdown = editContent;
+    const noteDir = getNoteDir(selectedEntry.id);
+
+    let html = marked.parse(rawMarkdown) as string;
+    html = DOMPurify.sanitize(html);
+
+    const token = getToken();
+
+    // 1. Rewrite assets path
+    const regex = /src=["']assets\/([^"']+)["']/g;
+    let resolvedHtml = html.replace(regex, (match, filename) => {
+      let serveUrl = getApiUrl(`/api/v1/attachments/notes/${noteDir}/assets/${filename}`);
+      if (token) {
+        serveUrl += `?token=${encodeURIComponent(token)}`;
+      }
+      return `src="${serveUrl}"`;
+    });
+
+    // 2. Rewrite temporary attachments path
+    const tempRegex = /src=["']attachments\/([^"']+)["']/g;
+    resolvedHtml = resolvedHtml.replace(tempRegex, (match, filename) => {
+      let serveUrl = getApiUrl(`/api/v1/attachments/file/${filename}`);
+      if (token) {
+        serveUrl += `?token=${encodeURIComponent(token)}`;
+      }
+      return `src="${serveUrl}"`;
+    });
+
+    return resolvedHtml;
+  });
 
   // Handle tag click
   function handleTag(tagName: string | null) {
@@ -325,16 +554,30 @@
     <div class="list-pane">
       <div class="list-header">
         <!-- Search Row -->
-        <div class="search-input-wrapper">
-          <svg class="search-icon-svg" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
-          </svg>
-          <input
-            type="text"
-            class="paper-input"
-            placeholder="搜索笔记标题或标签..."
-            bind:value={searchVal}
-          />
+        <div class="search-row-container" style="display: flex; gap: 8px; align-items: center; width: 100%;">
+          <div class="search-input-wrapper" style="flex: 1; position: relative;">
+            <svg class="search-icon-svg" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+            </svg>
+            <input
+              type="text"
+              class="paper-input"
+              placeholder="搜索笔记标题或标签..."
+              bind:value={searchVal}
+            />
+          </div>
+          <button 
+            class="paper-button primary" 
+            style="padding: 10px; border-radius: 8px; flex-shrink: 0; width: 38px; height: 38px; display: flex; align-items: center; justify-content: center;" 
+            onclick={() => showCreateModal = true}
+            title="新建知识条目"
+            aria-label="新建知识条目"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M5 12h14"/>
+              <path d="M12 5v14"/>
+            </svg>
+          </button>
         </div>
 
         <!-- Segmented Control for Categories -->
@@ -473,103 +716,225 @@
           <p>正在翻阅笔记...</p>
         </div>
       {:else if selectedEntry}
-        <div class="reader-content-wrapper">
-          <div class="note-paper">
-            <div class="note-header">
-              <div class="note-header-top">
-                <h1>{selectedEntry.title}</h1>
-                <button
-                  class="delete-btn {deleteConfirmActive ? 'confirm-active' : ''}"
-                  onclick={clickDelete}
-                >
-                  {#if deleteConfirmActive}
-                    <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" x2="12" y1="9" y2="13"/><line x1="12" x2="12.01" y1="17" y2="17"/></svg>
-                    再次点击以确认
-                  {:else}
-                    <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
-                    删除
-                  {/if}
-                </button>
+        <div class="reader-content-wrapper" class:edit-layout={isEditMode}>
+          {#if isEditMode}
+            <!-- Markdown Editor Pane -->
+            <div class="note-editor">
+              <div class="editor-header">
+                <h2>编辑知识条目</h2>
+                <div class="editor-controls">
+                  <div class="view-toggle segmented-control" style="width: auto;">
+                    <button class="segment-btn {editorView === 'edit' ? 'active' : ''}" onclick={() => editorView = 'edit'}>仅编辑</button>
+                    <button class="segment-btn {editorView === 'split' ? 'active' : ''}" onclick={() => editorView = 'split'}>双栏</button>
+                    <button class="segment-btn {editorView === 'preview' ? 'active' : ''}" onclick={() => editorView = 'preview'}>仅预览</button>
+                  </div>
+                  <div class="action-buttons" style="display: flex; gap: 8px;">
+                    <button class="paper-button" onclick={cancelEditing}>取消</button>
+                    <button class="paper-button primary" onclick={saveEditing} disabled={savingNote}>
+                      {savingNote ? '正在保存...' : '保存'}
+                    </button>
+                  </div>
+                </div>
               </div>
 
-              <div class="metadata-block">
-                <div class="meta-row">
-                  <span class="meta-label">标识 (ID):</span>
-                  <span class="meta-value font-mono">{selectedEntry.id}</span>
+              <!-- Metadata Editing -->
+              <div class="editor-metadata">
+                <div class="form-group">
+                  <label for="edit-title">标题:</label>
+                  <input id="edit-title" type="text" class="paper-input" bind:value={editTitle} placeholder="文章标题" />
                 </div>
-                {#if selectedEntry.source_url}
-                  <div class="meta-row">
-                    <span class="meta-label">原始来源:</span>
-                    <span class="meta-value">
-                      <a href={selectedEntry.source_url} target="_blank" rel="noopener noreferrer">
-                        {selectedEntry.source_url} 🔗
-                      </a>
-                    </span>
-                  </div>
-                {/if}
-                <div class="meta-row">
-                  <span class="meta-label">创建时间:</span>
-                  <span class="meta-value">{formatDate(selectedEntry.created_at)}</span>
+                <div class="form-group">
+                  <label for="edit-source">来源 URL:</label>
+                  <input id="edit-source" type="text" class="paper-input" bind:value={editSourceUrl} placeholder="https://..." />
                 </div>
-                {#if selectedEntry.tags && selectedEntry.tags.length > 0}
-                  <div class="meta-row align-center">
-                    <span class="meta-label">标签归属:</span>
-                    <div class="meta-tags-list">
-                      {#each selectedEntry.tags as tag}
-                        <span class="note-tag-pill">#{tag}</span>
+                <div class="form-group">
+                  <label>标签 (按 Enter 添加):</label>
+                  <div class="tag-input-container">
+                    <div class="edit-tags-list">
+                      {#each editTags as tag}
+                        <span class="note-tag-pill editing">
+                          #{tag}
+                          <button class="remove-tag-btn" onclick={() => editTags = editTags.filter(t => t !== tag)}>×</button>
+                        </span>
                       {/each}
                     </div>
+                    <input
+                      type="text"
+                      class="paper-input tag-input-box"
+                      placeholder="输入新标签并回车"
+                      onkeydown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          const val = (e.target as HTMLInputElement).value.trim().replace(/^#/, '');
+                          if (val && !editTags.includes(val)) {
+                            editTags = [...editTags, val];
+                          }
+                          (e.target as HTMLInputElement).value = '';
+                        }
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <!-- Content Work Area (Edit and/or Preview) -->
+              <div class="editor-workspace {editorView}">
+                {#if editorView === 'edit' || editorView === 'split'}
+                  <div class="edit-pane-editor">
+                    <textarea
+                      bind:this={textareaRef}
+                      class="editor-textarea"
+                      bind:value={editContent}
+                      placeholder="使用 Markdown 编写内容..."
+                    ></textarea>
+                  </div>
+                {/if}
+                
+                {#if editorView === 'preview' || editorView === 'split'}
+                  <div class="preview-pane-viewer markdown-body text-layout">
+                    {@html compiledEditPreview()}
                   </div>
                 {/if}
               </div>
-            </div>
 
-            <!-- Rendered Markdown content -->
-            <div class="markdown-body text-layout">
-              {@html compiledContent()}
-            </div>
-
-            <!-- Attachments shelf -->
-            {#if selectedEntry.attachments && selectedEntry.attachments.length > 0}
-              <div class="attachments-shelf">
-                <h3>📎 笔记附件 ({selectedEntry.attachments.length})</h3>
-                <div class="attachments-grid">
-                  {#each selectedEntry.attachments as att}
-                    <a
-                      class="attachment-card"
-                      href={getAttachmentUrl(att.name)}
-                      target="_blank"
-                      download={att.name}
-                    >
-                      <div class="attachment-preview">
-                        {#if isImage(att.name)}
-                          <img src={getAttachmentUrl(att.name)} alt={att.name} loading="lazy" />
-                        {:else}
-                          <div class="file-icon-placeholder">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="file-icon-svg"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></svg>
-                            <span class="file-ext">{getFileExt(att.name)}</span>
-                          </div>
-                        {/if}
-                        <div class="attachment-hover-overlay">
-                          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="hover-download-svg"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
-                        </div>
+              <!-- Attachments manager shelf -->
+              <div class="editor-attachments-shelf">
+                <h3>📎 附件管理 ({editAttachments.length})</h3>
+                <div class="upload-bar">
+                  <label class="paper-button upload-btn" style="cursor: pointer; margin-bottom: 0;">
+                    📤 选择文件上传
+                    <input type="file" style="display: none;" onchange={handleUploadAttachment} />
+                  </label>
+                  {#if uploadingAttachment}
+                    <span class="uploading-indicator">正在上传文件...</span>
+                  {/if}
+                </div>
+                
+                <div class="attachments-edit-grid">
+                  {#each editAttachments as att}
+                    <div class="attachment-edit-card">
+                      <div class="att-info">
+                        <div class="att-name" title={att.name}>{att.name}</div>
+                        <div class="att-size">{formatBytes(att.size)}</div>
                       </div>
-                      <div class="attachment-details">
-                        <div class="attachment-name" title={att.name}>{att.name}</div>
-                        <div class="attachment-meta">
-                          <span class="attachment-size">{formatBytes(att.size)}</span>
-                          {#if att.description}
-                            <span class="attachment-desc-sep">•</span>
-                            <span class="attachment-desc" title={att.description}>{att.description}</span>
-                          {/if}
-                        </div>
+                      <div class="att-actions">
+                        <button class="att-action-btn insert-btn" onclick={() => insertAttachment(att)} title="插入正文光标处">
+                          📥 插入
+                        </button>
+                        <button class="att-action-btn delete-btn" onclick={() => removeAttachment(att.name)} title="移除关联">
+                          🗑️ 移除
+                        </button>
                       </div>
-                    </a>
+                    </div>
                   {/each}
                 </div>
               </div>
-            {/if}
-          </div>
+            </div>
+          {:else}
+            <!-- Original Reader Pane -->
+            <div class="note-paper">
+              <div class="note-header">
+                <div class="note-header-top">
+                  <h1>{selectedEntry.title}</h1>
+                  <div class="note-actions" style="display: flex; gap: 8px;">
+                    <button class="delete-btn" onclick={startEditing} style="border-color: var(--accent-sage); color: var(--accent-sage); background: rgba(74, 107, 93, 0.04);">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+                      编辑
+                    </button>
+                    <button
+                      class="delete-btn {deleteConfirmActive ? 'confirm-active' : ''}"
+                      onclick={clickDelete}
+                    >
+                      {#if deleteConfirmActive}
+                        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" x2="12" y1="9" y2="13"/><line x1="12" x2="12.01" y1="17" y2="17"/></svg>
+                        再次点击以确认
+                      {:else}
+                        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
+                        删除
+                      {/if}
+                    </button>
+                  </div>
+                </div>
+
+                <div class="metadata-block">
+                  <div class="meta-row">
+                    <span class="meta-label">标识 (ID):</span>
+                    <span class="meta-value font-mono">{selectedEntry.id}</span>
+                  </div>
+                  {#if selectedEntry.source_url}
+                    <div class="meta-row">
+                      <span class="meta-label">原始来源:</span>
+                      <span class="meta-value">
+                        <a href={selectedEntry.source_url} target="_blank" rel="noopener noreferrer">
+                          {selectedEntry.source_url} 🔗
+                        </a>
+                      </span>
+                    </div>
+                  {/if}
+                  <div class="meta-row">
+                    <span class="meta-label">创建时间:</span>
+                    <span class="meta-value">{formatDate(selectedEntry.created_at)}</span>
+                  </div>
+                  {#if selectedEntry.tags && selectedEntry.tags.length > 0}
+                    <div class="meta-row align-center">
+                      <span class="meta-label">标签归属:</span>
+                      <div class="meta-tags-list">
+                        {#each selectedEntry.tags as tag}
+                          <span class="note-tag-pill">#{tag}</span>
+                        {/each}
+                      </div>
+                    </div>
+                  {/if}
+                </div>
+              </div>
+
+              <!-- Rendered Markdown content -->
+              <div class="markdown-body text-layout">
+                {@html compiledContent()}
+              </div>
+
+              <!-- Attachments shelf -->
+              {#if selectedEntry.attachments && selectedEntry.attachments.length > 0}
+                <div class="attachments-shelf">
+                  <h3>📎 笔记附件 ({selectedEntry.attachments.length})</h3>
+                  <div class="attachments-grid">
+                    {#each selectedEntry.attachments as att}
+                      <a
+                        class="attachment-card"
+                        href={getAttachmentUrl(att.name)}
+                        target="_blank"
+                        download={att.name}
+                      >
+                        <div class="attachment-preview">
+                          {#if isImage(att.name)}
+                            <img src={getAttachmentUrl(att.name)} alt={att.name} loading="lazy" />
+                          {:else}
+                            <div class="file-icon-placeholder">
+                              <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="file-icon-svg"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></svg>
+                              <span class="file-ext">{getFileExt(att.name)}</span>
+                            </div>
+                          {/if}
+                          <div class="attachment-hover-overlay">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="hover-download-svg"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+                          </div>
+                        </div>
+                        <div class="attachment-details">
+                          <div class="attachment-name" title={att.name}>{att.name}</div>
+                          <div class="attachment-meta">
+                            <span class="attachment-size">{formatBytes(att.size)}</span>
+                            {#if att.description}
+                              <span class="attachment-desc-sep">•</span>
+                              <span class="attachment-desc" title={att.description}>{att.description}</span>
+                            {/if}
+                          </div>
+                        </div>
+                      </a>
+                    {/each}
+                  </div>
+                </div>
+              {/if}
+            </div>
+          {/if}
         </div>
       {:else}
         <div class="no-selection">
@@ -579,6 +944,62 @@
         </div>
       {/if}
     </div>
+    
+    <!-- Create Note Modal -->
+    {#if showCreateModal}
+      <div class="modal-overlay">
+        <div class="modal-container">
+          <div class="modal-header">
+            <h3>新建知识条目</h3>
+            <button class="modal-close-btn" onclick={() => showCreateModal = false}>
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" x2="6" y1="6" y2="18"/><line x1="6" x2="18" y1="6" y2="18"/></svg>
+            </button>
+          </div>
+          <div class="modal-body">
+            <div class="modal-form-group">
+              <label for="create-note-title">标题</label>
+              <input
+                id="create-note-title"
+                type="text"
+                class="paper-input"
+                placeholder="请输入笔记标题..."
+                bind:value={newNoteTitle}
+              />
+            </div>
+            <div class="modal-form-group">
+              <label for="create-note-category">分类目录</label>
+              <select id="create-note-category" bind:value={newNoteCategory}>
+                <option value="inbox">待整理 (inbox)</option>
+                <option value="daily">随笔 (daily)</option>
+                <option value="topics">专题 (topics)</option>
+              </select>
+            </div>
+            {#if newNoteCategory === 'topics'}
+              <div class="modal-form-group">
+                <label for="create-note-subcategory">子分类名 (如 frontend, general)</label>
+                <input
+                  id="create-note-subcategory"
+                  type="text"
+                  class="paper-input"
+                  placeholder="请输入子分类..."
+                  bind:value={newNoteSubCategory}
+                />
+              </div>
+            {/if}
+          </div>
+          <div class="modal-footer">
+            <button class="paper-button" onclick={() => showCreateModal = false}>取消</button>
+            <button
+              class="paper-button primary"
+              onclick={executeCreateNote}
+              disabled={creatingNote || !newNoteTitle.trim()}
+            >
+              {creatingNote ? '创建中...' : '确认创建'}
+            </button>
+          </div>
+        </div>
+      </div>
+    {/if}
   {/if}
 </div>
 
@@ -1364,5 +1785,298 @@
     0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
     70% { box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
     100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+  }
+
+  /* --- New Editor Styles --- */
+  .reader-content-wrapper.edit-layout {
+    max-width: 1200px;
+    width: 100%;
+  }
+
+  .note-editor {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    background: #ffffff;
+    border: 1px solid var(--border-fine);
+    border-radius: 8px;
+    padding: 30px;
+    box-shadow: var(--shadow-paper-lift);
+  }
+
+  .editor-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px dashed var(--border-fine);
+    padding-bottom: 16px;
+    flex-wrap: wrap;
+    gap: 16px;
+  }
+
+  .editor-header h2 {
+    font-size: 20px;
+    font-weight: 700;
+  }
+
+  .editor-controls {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .editor-metadata {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    background: var(--bg-card);
+    padding: 16px;
+    border-radius: 6px;
+    border: 1px solid var(--border-fine);
+  }
+
+  .form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .form-group label {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-align: left;
+  }
+
+  .tag-input-container {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .edit-tags-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .note-tag-pill.editing {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding-right: 4px;
+  }
+
+  .remove-tag-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-size: 14px;
+    font-weight: bold;
+    cursor: pointer;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    transition: all 0.1s ease;
+  }
+
+  .remove-tag-btn:hover {
+    background: rgba(0,0,0,0.1);
+    color: var(--accent-ochre);
+  }
+
+  .tag-input-box {
+    max-width: 200px;
+  }
+
+  .editor-workspace {
+    display: grid;
+    gap: 20px;
+    min-height: 400px;
+    border: 1px solid var(--border-fine);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+
+  .editor-workspace.edit {
+    grid-template-columns: 1fr;
+  }
+
+  .editor-workspace.preview {
+    grid-template-columns: 1fr;
+    padding: 24px;
+    background: #ffffff;
+    max-height: 600px;
+    overflow-y: auto;
+  }
+
+  .editor-workspace.split {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .edit-pane-editor {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    border-right: 1px solid var(--border-fine);
+  }
+
+  .editor-workspace.edit .edit-pane-editor {
+    border-right: none;
+  }
+
+  .editor-textarea {
+    width: 100%;
+    height: 500px;
+    padding: 20px;
+    border: none;
+    resize: vertical;
+    font-family: monospace;
+    font-size: 14px;
+    line-height: 1.6;
+    background: #faf9f6;
+    color: var(--text-ink);
+    outline: none;
+  }
+
+  .preview-pane-viewer {
+    padding: 20px;
+    background: #ffffff;
+    overflow-y: auto;
+    height: 500px;
+  }
+
+  .editor-attachments-shelf {
+    border-top: 1px dashed var(--border-fine);
+    padding-top: 20px;
+    margin-top: 10px;
+    text-align: left;
+  }
+
+  .editor-attachments-shelf h3 {
+    font-size: 15px;
+    margin-bottom: 12px;
+  }
+
+  .upload-bar {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 16px;
+  }
+
+  .upload-btn {
+    font-size: 13px;
+    padding: 8px 14px;
+  }
+
+  .uploading-indicator {
+    font-size: 13px;
+    color: var(--text-muted);
+    font-style: italic;
+  }
+
+  .attachments-edit-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 12px;
+  }
+
+  .attachment-edit-card {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: var(--bg-card);
+    border: 1px solid var(--border-fine);
+    border-radius: 6px;
+    padding: 10px 14px;
+  }
+
+  .att-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    flex: 1;
+  }
+
+  .att-name {
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--text-ink);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-align: left;
+  }
+
+  .att-size {
+    font-size: 11px;
+    color: var(--text-muted);
+    text-align: left;
+  }
+
+  .att-actions {
+    display: flex;
+    gap: 6px;
+  }
+
+  .att-action-btn {
+    background: #ffffff;
+    border: 1px solid var(--border-fine);
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 11px;
+    cursor: pointer;
+    font-family: var(--font-sans);
+    transition: all 0.15s ease;
+    outline: none;
+  }
+
+  .att-action-btn.insert-btn:hover {
+    background: var(--accent-sage);
+    color: #ffffff;
+    border-color: var(--accent-sage);
+  }
+
+  .att-action-btn.delete-btn {
+    color: #b91c1c;
+  }
+
+  .att-action-btn.delete-btn:hover {
+    background: #fef2f2;
+    border-color: #fee2e2;
+  }
+
+  /* Create Modal Style overrides */
+  .modal-form-group {
+    margin-bottom: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    text-align: left;
+  }
+  .modal-form-group label {
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--text-ink);
+  }
+  .modal-form-group select {
+    width: 100%;
+    padding: 10px 14px;
+    background: var(--bg-paper);
+    border: 1px solid var(--border-fine);
+    border-radius: 4px;
+    color: var(--text-ink);
+    font-family: var(--font-sans);
+    outline: none;
+    font-size: 14px;
+  }
+  .modal-form-group select:focus {
+    border-color: var(--border-focus);
   }
 </style>

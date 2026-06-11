@@ -1,11 +1,12 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { request, getToken, removeToken } from "./lib/api";
+  import { request, getToken, removeToken, getBaseUrl } from "./lib/api";
   import Login from "./components/Login.svelte";
   import Sidebar from "./components/Sidebar.svelte";
   import Knowledge from "./components/Knowledge.svelte";
   import Keys from "./components/Keys.svelte";
   import Users from "./components/Users.svelte";
+  import ChatWidget from "./components/ChatWidget.svelte";
 
   let loadingProfile = $state(true);
   let authenticated = $state(false);
@@ -101,6 +102,12 @@
       {/if}
     </main>
   </div>
+
+  <ChatWidget
+    apiUrl={getBaseUrl()}
+    token={getToken() || ""}
+    isBlocked={status !== 'active' && !isAdmin}
+  />
 {/if}
 
 <style>
