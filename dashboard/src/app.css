@@ -40,6 +40,11 @@ body {
 }
 
 /* Scrollbars - customized like clean lines */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(35, 33, 28, 0.15) transparent;
+}
+
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -48,11 +53,11 @@ body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--border-fine);
+  background: rgba(35, 33, 28, 0.15);
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--text-muted);
+  background: rgba(35, 33, 28, 0.35);
 }
 
 /* Typography styles */

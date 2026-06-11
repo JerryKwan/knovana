@@ -1,4 +1,4 @@
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
 import { generateFrontmatter, parseFrontmatter } from "./frontmatter";
 import type {
@@ -46,6 +46,20 @@ export class KnowledgeFileOps {
     // Map parsed frontmatter to entry fields
     const attachments: KnowledgeAttachment[] = data.attachments || [];
     const tags: string[] = data.tags || [];
+
+    // Dynamically retrieve physical file size from disk if missing/0 in metadata
+    const assetsDir = join(dirname(filePath), "assets");
+    for (const att of attachments) {
+      if (!att.size) {
+        try {
+          const attPath = join(assetsDir, att.name);
+          const s = await stat(attPath);
+          att.size = s.size;
+        } catch {
+          att.size = 0;
+        }
+      }
+    }
 
     return {
       id: relative(this.root, filePath).replace(/\\/g, "/"), // Normalized slash

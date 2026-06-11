@@ -34,6 +34,7 @@ export class UserService {
       password_hash: hashedPassword,
       kb_path: kbPath,
       settings: JSON.stringify(DEFAULT_SETTINGS),
+      status: "inactive",
     });
 
     const token = await generateToken(newUser.id, newUser.username);

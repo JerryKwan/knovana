@@ -5,12 +5,15 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "build": "tsc -p tsconfig.json",
+    "build:ui": "pnpm --dir ../dashboard build",
+    "build:server": "tsc -p tsconfig.json",
+    "build": "pnpm build:ui && pnpm build:server",
     "start": "node dist/server.js",
     "test": "vitest run",
     "format": "prettier --write .",
     "lint": "prettier --check . && eslint .",
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "postinstall": "pnpm --dir ../dashboard install"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "latest",

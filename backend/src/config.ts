@@ -30,6 +30,8 @@ const envSchema = z.object({
   KNOVANA_CORS_ORIGINS: z
     .string()
     .default("chrome-extension://*,http://localhost:*,http://127.0.0.1:*"),
+  KNOVANA_ADMIN_USERNAME: z.string().default("admin"),
+  KNOVANA_ADMIN_PASSWORD: z.string().default("admin-password-123456"),
 });
 
 const parsedEnv = envSchema.parse(process.env);
@@ -69,4 +71,6 @@ export const config = {
   corsOrigins: parsedEnv.KNOVANA_CORS_ORIGINS.split(",").map((origin) =>
     origin.trim(),
   ),
+  adminUsername: parsedEnv.KNOVANA_ADMIN_USERNAME,
+  adminPassword: parsedEnv.KNOVANA_ADMIN_PASSWORD,
 };

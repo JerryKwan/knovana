@@ -122,12 +122,28 @@
     }
   }
 
-  // Delete note
-  async function handleDelete(id: string) {
-    if (!confirm("确定要永久删除这篇知识笔记吗？相关附件也将被物理删除。")) {
-      return;
-    }
+  // Delete note states & logic
+  let deleteConfirmActive = $state(false);
+  let deleteTimeout: any = null;
 
+  function clickDelete() {
+    if (!selectedEntry) return;
+    if (!deleteConfirmActive) {
+      deleteConfirmActive = true;
+      deleteTimeout = setTimeout(() => {
+        deleteConfirmActive = false;
+      }, 3000);
+    } else {
+      if (deleteTimeout) {
+        clearTimeout(deleteTimeout);
+        deleteTimeout = null;
+      }
+      deleteConfirmActive = false;
+      executeDelete(selectedEntry.id);
+    }
+  }
+
+  async function executeDelete(id: string) {
     errorMsg = "";
     const res = await request(`/api/v1/knowledge/${encodeURIComponent(id)}`, {
       method: "DELETE",
@@ -142,6 +158,17 @@
       await loadTags();
     }
   }
+
+  // Cancel deletion state when selecting a different note
+  $effect(() => {
+    if (selectedId) {
+      deleteConfirmActive = false;
+      if (deleteTimeout) {
+        clearTimeout(deleteTimeout);
+        deleteTimeout = null;
+      }
+    }
+  });
 
   // Handle category change
   function handleCategory(category: string) {
@@ -233,6 +260,29 @@
     } catch {
       return isoStr;
     }
+  }
+
+  // Helper to generate full attachment URL
+  function getAttachmentUrl(attName: string): string {
+    if (!selectedEntry) return "";
+    const noteDir = getNoteDir(selectedEntry.id);
+    let serveUrl = getApiUrl(`/api/v1/attachments/notes/${noteDir}/assets/${encodeURIComponent(attName)}`);
+    const token = getToken();
+    if (token) {
+      serveUrl += `?token=${encodeURIComponent(token)}`;
+    }
+    return serveUrl;
+  }
+
+  // Helper to check if file is an image
+  function isImage(attName: string): boolean {
+    const ext = attName.split('.').pop()?.toLowerCase();
+    return ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp'].includes(ext || '');
+  }
+
+  // Helper to get file extension
+  function getFileExt(attName: string): string {
+    return attName.split('.').pop()?.toUpperCase() || 'FILE';
   }
 
   // Handle global click to dismiss popover
@@ -384,7 +434,7 @@
               >
                 <div class="note-item-title">{entry.title}</div>
                 <div class="note-item-meta">
-                  <span class="note-type">{entry.type === 'excerpt' ? '摘录' : entry.type === 'note' ? '笔记' : entry.type}</span>
+                  <span class="note-type" class:excerpt={entry.type === 'excerpt'} class:note={entry.type === 'note'}>{entry.type === 'excerpt' ? '摘录' : entry.type === 'note' ? '笔记' : entry.type}</span>
                   <span class="note-date">{formatDate(entry.created_at)}</span>
                 </div>
                 {#if entry.tags && entry.tags.length > 0}
@@ -429,11 +479,16 @@
               <div class="note-header-top">
                 <h1>{selectedEntry.title}</h1>
                 <button
-                  class="paper-button danger delete-btn"
-                  onclick={() => handleDelete(selectedEntry!.id)}
+                  class="delete-btn {deleteConfirmActive ? 'confirm-active' : ''}"
+                  onclick={clickDelete}
                 >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-trash-2"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
-                  删除笔记
+                  {#if deleteConfirmActive}
+                    <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" x2="12" y1="9" y2="13"/><line x1="12" x2="12.01" y1="17" y2="17"/></svg>
+                    再次点击以确认
+                  {:else}
+                    <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
+                    删除
+                  {/if}
                 </button>
               </div>
 
@@ -480,23 +535,36 @@
                 <h3>📎 笔记附件 ({selectedEntry.attachments.length})</h3>
                 <div class="attachments-grid">
                   {#each selectedEntry.attachments as att}
-                    <div class="attachment-item">
-                      <div class="att-info">
-                        <span class="att-name" title={att.name}>{att.name}</span>
-                        <span class="att-size">{formatBytes(att.size)}</span>
+                    <a
+                      class="attachment-card"
+                      href={getAttachmentUrl(att.name)}
+                      target="_blank"
+                      download={att.name}
+                    >
+                      <div class="attachment-preview">
+                        {#if isImage(att.name)}
+                          <img src={getAttachmentUrl(att.name)} alt={att.name} loading="lazy" />
+                        {:else}
+                          <div class="file-icon-placeholder">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="file-icon-svg"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></svg>
+                            <span class="file-ext">{getFileExt(att.name)}</span>
+                          </div>
+                        {/if}
+                        <div class="attachment-hover-overlay">
+                          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="hover-download-svg"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+                        </div>
                       </div>
-                      {#if att.description}
-                        <p class="att-desc">{att.description}</p>
-                      {/if}
-                      <a
-                        class="paper-button download-btn"
-                        href={getApiUrl(`/api/v1/attachments/notes/${getNoteDir(selectedEntry.id)}/assets/${encodeURIComponent(att.name)}`)}
-                        target="_blank"
-                        download={att.name}
-                      >
-                        下载附件
-                      </a>
-                    </div>
+                      <div class="attachment-details">
+                        <div class="attachment-name" title={att.name}>{att.name}</div>
+                        <div class="attachment-meta">
+                          <span class="attachment-size">{formatBytes(att.size)}</span>
+                          {#if att.description}
+                            <span class="attachment-desc-sep">•</span>
+                            <span class="attachment-desc" title={att.description}>{att.description}</span>
+                          {/if}
+                        </div>
+                      </div>
+                    </a>
                   {/each}
                 </div>
               </div>
@@ -571,23 +639,44 @@
     transform: translateY(-50%);
     color: var(--text-muted);
     pointer-events: none;
+    z-index: 2;
+  }
+
+  .list-header .paper-input {
+    border-radius: 8px;
+    background: var(--bg-card);
+    border-color: transparent;
+    padding: 10px 14px 10px 38px;
+    font-size: 13.5px;
+    color: var(--text-ink);
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  
+  .list-header .paper-input:hover {
+    background: var(--bg-card-hover);
+  }
+
+  .list-header .paper-input:focus {
+    background: var(--bg-paper);
+    border-color: var(--accent-ochre);
+    box-shadow: 0 0 0 3px rgba(178, 90, 56, 0.08);
   }
 
   /* Segmented Control */
   .segmented-control {
     display: flex;
     background: var(--bg-card);
-    border: 1px solid var(--border-fine);
+    border: none;
     border-radius: 8px;
-    padding: 3px;
-    gap: 4px;
+    padding: 4px;
+    gap: 2px;
   }
 
   .segment-btn {
     flex: 1;
     text-align: center;
-    padding: 6px 2px;
-    font-size: 12px;
+    padding: 6px 4px;
+    font-size: 12.5px;
     background: transparent;
     border: none;
     border-radius: 6px;
@@ -601,13 +690,13 @@
 
   .segment-btn:hover {
     color: var(--text-ink);
-    background: var(--bg-card-hover);
+    background: rgba(0, 0, 0, 0.03);
   }
 
   .segment-btn.active {
-    background: var(--bg-paper);
+    background: #ffffff;
     color: var(--accent-ochre);
-    box-shadow: var(--shadow-paper);
+    box-shadow: 0 1px 3px rgba(35, 33, 28, 0.08), 0 1px 2px rgba(35, 33, 28, 0.04);
     font-weight: 600;
   }
 
@@ -617,7 +706,7 @@
     align-items: center;
     justify-content: space-between;
     position: relative;
-    background: var(--bg-paper);
+    background: transparent;
     gap: 8px;
   }
 
@@ -626,15 +715,15 @@
     align-items: center;
     gap: 6px;
     font-family: var(--font-sans);
-    font-size: 12px;
+    font-size: 12.5px;
     font-weight: 500;
     color: var(--text-muted);
     background: var(--bg-card);
-    border: 1px solid var(--border-fine);
-    padding: 5px 12px;
+    border: 1px solid transparent;
+    padding: 6px 12px;
     border-radius: 6px;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
     outline: none;
     flex-grow: 1;
     text-align: left;
@@ -648,7 +737,7 @@
   .tag-trigger-btn.active {
     border-color: var(--accent-sage);
     color: var(--accent-sage);
-    background: rgba(74, 107, 93, 0.05);
+    background: rgba(74, 107, 93, 0.08);
   }
 
   .clear-tag-btn {
@@ -656,8 +745,8 @@
     border: 1px solid var(--border-fine);
     color: var(--text-muted);
     border-radius: 6px;
-    width: 26px;
-    height: 26px;
+    width: 28px;
+    height: 28px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -772,82 +861,100 @@
   .notes-list {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 12px;
   }
 
   .note-item {
     position: relative;
-    padding: 16px 16px 16px 22px;
-    background: var(--bg-paper);
-    border: 1px solid var(--border-fine);
-    border-radius: 6px;
+    padding: 12px 14px 12px 18px;
+    background: transparent;
+    border: none;
+    border-radius: 8px;
     cursor: pointer;
     text-align: left;
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-    box-shadow: var(--shadow-paper);
   }
 
   .note-item:hover {
-    background: var(--bg-card-hover);
-    border-color: var(--text-muted);
-    transform: translateY(-1px);
-    box-shadow: var(--shadow-paper-lift);
+    background: var(--bg-card);
   }
 
   .note-item.selected {
-    background: var(--bg-card);
-    border-color: var(--accent-ochre);
-    border-width: 1px;
-    box-shadow: var(--shadow-paper-lift);
+    background: rgba(178, 90, 56, 0.06);
   }
 
   .note-item.selected::before {
     content: '';
     position: absolute;
-    left: 6px;
+    left: 0;
     top: 15%;
-    width: 3.5px;
+    width: 4px;
     height: 70%;
     background-color: var(--accent-ochre);
-    border-radius: 2px;
+    border-radius: 4px;
   }
 
   .note-item-title {
     font-family: var(--font-serif);
     font-weight: 600;
     font-size: 14.5px;
-    margin-bottom: 8px;
+    margin-bottom: 6px;
     color: var(--text-ink);
-    line-height: 1.35;
+    line-height: 1.4;
+    transition: color 0.15s ease;
+  }
+
+  .note-item.selected .note-item-title {
+    color: var(--accent-ochre);
   }
 
   .note-item-meta {
     display: flex;
     justify-content: space-between;
+    align-items: center;
     font-size: 11px;
     color: var(--text-muted);
-    margin-bottom: 8px;
+    margin-bottom: 6px;
+  }
+
+  .note-type {
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-size: 9.5px;
+    font-weight: 600;
+    line-height: 1.2;
+  }
+  .note-type.excerpt {
+    background: rgba(74, 107, 93, 0.1);
+    color: var(--accent-sage);
+  }
+  .note-type.note {
+    background: rgba(178, 90, 56, 0.1);
+    color: var(--accent-ochre);
   }
 
   .note-item-tags {
     display: flex;
     flex-wrap: wrap;
     gap: 4px;
+    margin-top: 4px;
   }
 
   .note-tag-pill {
     font-size: 10px;
     padding: 1px 6px;
     background: var(--bg-card);
-    border: 1px solid var(--border-fine);
-    border-radius: 10px;
-    color: var(--accent-sage);
+    border: 1px solid transparent;
+    border-radius: 4px;
+    color: var(--text-muted);
     font-family: var(--font-sans);
     font-weight: 500;
+    transition: all 0.15s ease;
   }
 
   .note-item.selected .note-tag-pill {
-    background: var(--bg-paper);
+    background: rgba(178, 90, 56, 0.08);
+    color: var(--accent-ochre);
   }
 
   /* Reader Pane (Column 2) */
@@ -879,8 +986,8 @@
 
   .toggle-list-btn {
     pointer-events: auto;
-    background: var(--bg-paper);
-    border: 1px solid var(--border-fine);
+    background: transparent;
+    border: none;
     border-radius: 6px;
     width: 32px;
     height: 32px;
@@ -889,8 +996,7 @@
     justify-content: center;
     cursor: pointer;
     color: var(--text-muted);
-    transition: all 0.2s ease;
-    box-shadow: var(--shadow-paper);
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
     outline: none;
     margin-top: 16px;
   }
@@ -898,7 +1004,6 @@
   .toggle-list-btn:hover {
     background: var(--bg-card-hover);
     color: var(--text-ink);
-    box-shadow: var(--shadow-paper-lift);
   }
 
   .reader-content-wrapper {
@@ -1003,55 +1108,144 @@
     gap: 16px;
   }
 
-  .attachment-item {
-    background: var(--bg-paper);
-    border: 1px solid var(--border-fine);
-    border-radius: 6px;
-    padding: 16px;
+  .attachment-card {
     display: flex;
     flex-direction: column;
-    justify-content: space-between;
-    gap: 12px;
+    background: #ffffff;
+    border: 1px solid var(--border-fine);
+    border-radius: 8px;
+    overflow: hidden;
+    text-decoration: none;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
     box-shadow: var(--shadow-paper);
-    transition: all 0.2s ease;
+    cursor: pointer;
   }
 
-  .attachment-item:hover {
-    transform: translateY(-1px);
+  .attachment-card:hover {
+    transform: translateY(-2px);
     box-shadow: var(--shadow-paper-lift);
+    border-color: var(--accent-ochre);
   }
 
-  .att-info {
+  .attachment-preview {
+    position: relative;
+    width: 100%;
+    height: 120px;
+    background: var(--bg-card);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-bottom: 1px solid var(--border-fine);
+    overflow: hidden;
+  }
+
+  .attachment-preview img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transition: transform 0.3s ease;
+  }
+
+  .attachment-card:hover .attachment-preview img {
+    transform: scale(1.05);
+  }
+
+  .file-icon-placeholder {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    color: var(--text-muted);
+  }
+
+  .file-icon-svg {
+    stroke-width: 1.5;
+  }
+
+  .file-ext {
+    font-size: 10px;
+    font-weight: 700;
+    font-family: var(--font-sans);
+    background: rgba(35, 33, 28, 0.08);
+    padding: 2px 6px;
+    border-radius: 4px;
+    color: var(--text-muted);
+  }
+
+  .attachment-hover-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(35, 33, 28, 0.4);
+    backdrop-filter: blur(2px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+  }
+
+  .attachment-card:hover .attachment-hover-overlay {
+    opacity: 1;
+  }
+
+  .hover-download-svg {
+    color: #ffffff;
+    stroke-width: 2.5;
+    animation: downloadBounce 1.5s infinite;
+  }
+
+  @keyframes downloadBounce {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-3px); }
+  }
+
+  .attachment-details {
+    padding: 12px;
     display: flex;
     flex-direction: column;
     gap: 4px;
+    text-align: left;
   }
 
-  .att-name {
+  .attachment-name {
     font-weight: 600;
-    font-size: 13px;
+    font-size: 12.5px;
     color: var(--text-ink);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    line-height: 1.3;
   }
 
-  .att-size {
+  .attachment-card:hover .attachment-name {
+    color: var(--accent-ochre);
+  }
+
+  .attachment-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
     font-size: 11px;
     color: var(--text-muted);
   }
 
-  .att-desc {
-    font-size: 12px;
-    color: var(--text-muted);
-    line-height: 1.4;
+  .attachment-size {
+    font-weight: 500;
+    flex-shrink: 0;
   }
 
-  .download-btn {
-    padding: 8px 12px;
-    font-size: 12px;
-    width: 100%;
-    margin-top: 4px;
+  .attachment-desc-sep {
+    color: var(--border-fine);
+  }
+
+  .attachment-desc {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   /* Empty / No Selection State */
@@ -1129,5 +1323,46 @@
     border-radius: 4px;
     font-size: 13px;
     text-align: left;
+  }
+
+  .delete-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    font-size: 12.5px;
+    color: var(--text-muted);
+    background: transparent;
+    border: 1px solid var(--border-fine);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    outline: none;
+    font-family: var(--font-sans);
+    font-weight: 500;
+  }
+
+  .delete-btn:hover {
+    color: #ef4444;
+    border-color: rgba(239, 68, 68, 0.3);
+    background: rgba(239, 68, 68, 0.04);
+  }
+
+  .delete-btn.confirm-active {
+    color: #ffffff;
+    background: #ef4444;
+    border-color: #ef4444;
+    animation: pulseRed 1.5s infinite;
+  }
+
+  .delete-btn.confirm-active:hover {
+    background: #dc2626;
+    border-color: #dc2626;
+  }
+
+  @keyframes pulseRed {
+    0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
+    70% { box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
   }
 </style>

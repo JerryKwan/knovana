@@ -37,4 +37,15 @@ export class UserRepository {
       .prepare("UPDATE users SET settings = ? WHERE id = ?")
       .run(JSON.stringify(settings), id);
   }
+
+  listAll(): User[] {
+    const rows = this.db
+      .prepare("SELECT * FROM users ORDER BY created_at DESC")
+      .all();
+    return rows as unknown as User[];
+  }
+
+  updateStatus(id: string, status: "active" | "inactive"): void {
+    this.db.prepare("UPDATE users SET status = ? WHERE id = ?").run(status, id);
+  }
 }

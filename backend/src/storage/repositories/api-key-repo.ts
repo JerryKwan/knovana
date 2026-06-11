@@ -54,4 +54,16 @@ export class ApiKeyRepository {
       )
       .run(id);
   }
+
+  listAllKeys(): Array<ApiKey & { username: string }> {
+    const rows = this.db
+      .prepare(
+        `SELECT k.*, u.username 
+         FROM api_keys k 
+         JOIN users u ON k.user_id = u.id 
+         ORDER BY k.created_at DESC`,
+      )
+      .all();
+    return rows as unknown as Array<ApiKey & { username: string }>;
+  }
 }

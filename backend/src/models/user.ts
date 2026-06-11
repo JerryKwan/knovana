@@ -5,6 +5,7 @@ export interface User {
   kb_path: string;
   settings: string; // JSON string
   created_at: string;
+  status: "active" | "inactive";
 }
 
 export interface ApiKey {

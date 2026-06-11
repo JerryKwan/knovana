@@ -3,12 +3,17 @@ import { cors } from "hono/cors";
 import { errorHandler } from "./middleware/error";
 import { loggerMiddleware } from "./middleware/logger";
 import { authMiddleware } from "./middleware/auth";
+import { activeMiddleware } from "./middleware/active";
+import { adminMiddleware } from "./middleware/admin";
 import { authRoutes } from "./routes/auth";
 import { chatRoutes } from "./routes/chat";
 import { attachmentsRoutes } from "./routes/attachments";
 import { knowledgeRoutes } from "./routes/knowledge";
 import { searchRoutes } from "./routes/search";
 import { settingsRoutes } from "./routes/settings";
+import { keysRoutes } from "./routes/keys";
+import { adminRoutes } from "./routes/admin";
+import { serveStatic } from "@hono/node-server/serve-static";
 import { config } from "../config";
 import type { AppEnv } from "./env";
 
@@ -52,15 +57,18 @@ export function createApp() {
   app.use("*", loggerMiddleware);
   app.onError(errorHandler);
 
-  // 2. Register authentication routes (Unprotected)
+  // 2. Register authentication routes (Unprotected / me is protected)
+  app.use("/api/v1/auth/me", authMiddleware);
   app.route("/api/v1/auth", authRoutes);
 
-  // 3. Register protected route filters (Require authMiddleware)
-  app.use("/api/v1/chat/*", authMiddleware);
-  app.use("/api/v1/attachments/*", authMiddleware);
-  app.use("/api/v1/knowledge/*", authMiddleware);
-  app.use("/api/v1/search/*", authMiddleware);
-  app.use("/api/v1/settings/*", authMiddleware);
+  // 3. Register protected route filters (Require authMiddleware + activeMiddleware/adminMiddleware)
+  app.use("/api/v1/chat/*", authMiddleware, activeMiddleware);
+  app.use("/api/v1/attachments/*", authMiddleware, activeMiddleware);
+  app.use("/api/v1/knowledge/*", authMiddleware, activeMiddleware);
+  app.use("/api/v1/search/*", authMiddleware, activeMiddleware);
+  app.use("/api/v1/settings/*", authMiddleware, activeMiddleware);
+  app.use("/api/v1/keys/*", authMiddleware, activeMiddleware);
+  app.use("/api/v1/admin/*", authMiddleware, adminMiddleware);
 
   // 4. Mount protected route packages
   app.route("/api/v1/chat", chatRoutes);
@@ -68,6 +76,8 @@ export function createApp() {
   app.route("/api/v1/knowledge", knowledgeRoutes);
   app.route("/api/v1/search", searchRoutes);
   app.route("/api/v1/settings", settingsRoutes);
+  app.route("/api/v1/keys", keysRoutes);
+  app.route("/api/v1/admin", adminRoutes);
 
   // 5. Expose dynamic OpenAPI JSON document
   app.doc("/api/v1/docs/openapi.json", {
@@ -146,6 +156,10 @@ export function createApp() {
       </html>
     `);
   });
+
+  // 8. Serve Dashboard Static Files
+  app.use("/dashboard/*", serveStatic({ root: "./public" }));
+  app.get("/dashboard", (c) => c.redirect("/dashboard/"));
 
   return app;
 }

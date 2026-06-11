@@ -1,4 +1,7 @@
 import { getDatabase } from "./database";
+import bcrypt from "bcryptjs";
+import { config } from "../config";
+import { DEFAULT_SETTINGS } from "../models/user";
 
 /**
  * Runs the database migrations, initializing SQLite tables and indexes if they do not exist.
@@ -16,9 +19,17 @@ export function runMigrations(): void {
         password_hash TEXT NOT NULL,
         kb_path       TEXT NOT NULL,
         settings      TEXT DEFAULT '{}',
-        created_at    TEXT DEFAULT (datetime('now'))
+        created_at    TEXT DEFAULT (datetime('now')),
+        status        TEXT DEFAULT 'inactive'
       );
     `);
+
+    // Migration for existing users table to add status column if it doesn't exist
+    try {
+      db.exec("ALTER TABLE users ADD COLUMN status TEXT DEFAULT 'inactive';");
+    } catch (err) {
+      // Ignore error if column already exists
+    }
 
     // 2. Chat sessions table
     db.exec(`
@@ -97,8 +108,62 @@ export function runMigrations(): void {
     `);
 
     db.exec("COMMIT;");
+
+    // Sync admin user
+    syncAdminUser(db);
   } catch (err) {
     db.exec("ROLLBACK;");
     throw err;
+  }
+}
+
+/**
+ * Synchronizes the administrator credentials from environmental config to SQLite users database.
+ */
+function syncAdminUser(db: any): void {
+  const username = config.adminUsername;
+  const password = config.adminPassword;
+
+  if (!username || !password) return;
+
+  const existing = db
+    .prepare("SELECT * FROM users WHERE username = ?")
+    .get(username);
+
+  if (!existing) {
+    const userId = "usr_admin";
+    const salt = bcrypt.genSaltSync(10);
+    const hash = bcrypt.hashSync(password, salt);
+    const kbPath = userId;
+    const settings = JSON.stringify(DEFAULT_SETTINGS);
+
+    db.prepare(
+      "INSERT INTO users (id, username, password_hash, kb_path, settings, status) VALUES (?, ?, ?, ?, ?, ?)",
+    ).run(userId, username, hash, kbPath, settings, "active");
+
+    console.log(`[SQLite] Admin user '${username}' created and activated.`);
+  } else {
+    // Verify password matching config, sync changes
+    const matches = bcrypt.compareSync(password, existing.password_hash);
+    if (!matches) {
+      const salt = bcrypt.genSaltSync(10);
+      const hash = bcrypt.hashSync(password, salt);
+      db.prepare("UPDATE users SET password_hash = ? WHERE username = ?").run(
+        hash,
+        username,
+      );
+      console.log(
+        `[SQLite] Admin user '${username}' credentials synced from env configuration.`,
+      );
+    }
+    // Admin must always be active
+    if (existing.status !== "active") {
+      db.prepare("UPDATE users SET status = 'active' WHERE username = ?").run(
+        username,
+      );
+      console.log(
+        `[SQLite] Admin user '${username}' status forced to 'active'.`,
+      );
+    }
   }
 }
