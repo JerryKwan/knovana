@@ -234,22 +234,42 @@
   {:else}
     <!-- Academic Stat Cards -->
     <div class="stats-row">
-      <div class="stats-card highlight">
+      <!-- svelte-ignore a11y_click_events_have_key_events -->
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div 
+        class="stats-card {selectedCategory === 'all' ? 'active' : ''}" 
+        onclick={() => handleCategory("all")}
+      >
         <span class="stats-label">条目总数</span>
         <span class="stats-value">{stats().total}</span>
         <span class="stats-desc">全部记录与收录的知识条目</span>
       </div>
-      <div class="stats-card">
-        <span class="stats-label">收件箱</span>
+      <!-- svelte-ignore a11y_click_events_have_key_events -->
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div 
+        class="stats-card {selectedCategory === 'inbox' ? 'active' : ''}" 
+        onclick={() => handleCategory("inbox")}
+      >
+        <span class="stats-label">收集箱</span>
         <span class="stats-value">{stats().inboxCount}</span>
-        <span class="stats-desc">插件剪藏或未归档的的条目</span>
+        <span class="stats-desc">插件剪藏或未归档的条目</span>
       </div>
-      <div class="stats-card">
+      <!-- svelte-ignore a11y_click_events_have_key_events -->
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div 
+        class="stats-card {selectedCategory === 'topics' ? 'active' : ''}" 
+        onclick={() => handleCategory("topics")}
+      >
         <span class="stats-label">归档专题</span>
         <span class="stats-value">{stats().topicsCount}</span>
         <span class="stats-desc">已分类归档的主题研究条目</span>
       </div>
-      <div class="stats-card">
+      <!-- svelte-ignore a11y_click_events_have_key_events -->
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div 
+        class="stats-card {selectedCategory === 'daily' ? 'active' : ''}" 
+        onclick={() => handleCategory("daily")}
+      >
         <span class="stats-label">日志随笔</span>
         <span class="stats-value">{stats().dailyCount}</span>
         <span class="stats-desc">记录的日常碎片与日志条目</span>
@@ -272,22 +292,6 @@
           />
         </div>
 
-        <!-- Categories -->
-        <div class="segmented-control">
-          <button class="segment-btn {selectedCategory === 'all' ? 'active' : ''}" onclick={() => handleCategory("all")}>
-            全部
-          </button>
-          <button class="segment-btn {selectedCategory === 'inbox' ? 'active' : ''}" onclick={() => handleCategory("inbox")}>
-            收件箱
-          </button>
-          <button class="segment-btn {selectedCategory === 'topics' ? 'active' : ''}" onclick={() => handleCategory("topics")}>
-            专题
-          </button>
-          <button class="segment-btn {selectedCategory === 'daily' ? 'active' : ''}" onclick={() => handleCategory("daily")}>
-            随笔
-          </button>
-        </div>
-
         <!-- Tag Trigger Dropdown -->
         <div class="tag-filter-bar">
           <button class="tag-trigger-btn {selectedTag ? 'active' : ''}" onclick={() => showTagPopover = !showTagPopover}>
@@ -300,9 +304,10 @@
           </button>
 
           {#if selectedTag}
-            <button class="clear-tag-btn" onclick={() => handleTag(null)} title="清除标签筛选">
-              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
-            </button>
+            <span class="active-tag-pill">
+              #{selectedTag}
+              <button class="clear-tag-btn-inline" onclick={() => handleTag(null)} title="清除标签">×</button>
+            </span>
           {/if}
 
           {#if showTagPopover}
@@ -390,7 +395,7 @@
               <div class="card-header">
                 <div class="category-badge cat-{cat}">
                   <span class="dot-indicator"></span>
-                  {cat === 'inbox' ? '收件箱' : cat === 'topics' ? '专题' : cat === 'daily' ? '随笔' : cat}
+                  {cat === 'inbox' ? '收集箱' : cat === 'topics' ? '专题' : cat === 'daily' ? '随笔' : cat}
                 </div>
                 <span class="card-date">{formatDate(entry.created_at)}</span>
               </div>
@@ -447,7 +452,7 @@
                 <div class="col-title">{entry.title}</div>
                 <div class="col-type">
                   <span class="note-type" class:excerpt={entry.type === 'excerpt'} class:note={entry.type === 'note'}>
-                    {cat === 'inbox' ? '收件箱' : cat === 'topics' ? '专题' : cat === 'daily' ? '随笔' : cat}
+                    {cat === 'inbox' ? '收集箱' : cat === 'topics' ? '专题' : cat === 'daily' ? '随笔' : cat}
                   </span>
                 </div>
                 <div class="col-tags">
@@ -495,7 +500,7 @@
           <div class="form-group" style="margin-bottom: 16px;">
             <label for="new-note-cat" style="display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px;">归档位置:</label>
             <select id="new-note-cat" class="paper-input" bind:value={newNoteCategory} style="background: var(--bg-paper);">
-              <option value="inbox">📥 收件箱 (待整理)</option>
+              <option value="inbox">📥 收集箱 (待整理)</option>
               <option value="topics">📚 归档专题 (主题分组)</option>
               <option value="daily">📝 随笔日记 (日记记录)</option>
             </select>
@@ -580,7 +585,8 @@
     gap: 6px;
     position: relative;
     overflow: hidden;
-    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    cursor: pointer;
+    transition: all 0.22s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
   .stats-card:hover {
@@ -589,17 +595,20 @@
     border-color: var(--text-muted);
   }
 
-  .stats-card.highlight {
+  .stats-card.active {
     border-color: var(--accent-ochre);
+    background: #fffdfa; /* Parched warm paper tone */
+    box-shadow: var(--shadow-paper-lift);
+    transform: translateY(-2px);
   }
 
-  .stats-card.highlight::before {
+  .stats-card.active::after {
     content: "";
     position: absolute;
-    top: 0;
+    bottom: 0;
     left: 0;
-    width: 4px;
-    height: 100%;
+    right: 0;
+    height: 3px;
     background: var(--accent-ochre);
   }
 
@@ -612,10 +621,10 @@
   }
 
   .stats-card .stats-value {
-    font-size: 30px;
+    font-size: 32px;
     font-weight: 700;
     color: var(--text-ink);
-    font-family: var(--font-sans);
+    font-family: var(--font-serif);
     line-height: 1.1;
   }
 
@@ -686,48 +695,12 @@
     pointer-events: none;
   }
 
-  .segmented-control {
-    display: flex;
-    gap: 2px;
-    background: var(--bg-paper);
-    padding: 2px;
-    border-radius: 6px;
-    border: 1px solid var(--border-fine);
-    height: 36px;
-    align-items: center;
-  }
-
-  .segment-btn {
-    padding: 4px 12px;
-    height: 30px;
-    font-size: 12.5px;
-    font-weight: 500;
-    background: transparent;
-    border: none;
-    border-radius: 4px;
-    color: var(--text-muted);
-    cursor: pointer;
-    transition: all 0.18s ease;
-    font-family: var(--font-sans);
-    white-space: nowrap;
-  }
-
-  .segment-btn:hover {
-    color: var(--text-ink);
-  }
-
-  .segment-btn.active {
-    background: var(--bg-card-hover);
-    color: var(--accent-ochre);
-    font-weight: 600;
-  }
-
   /* Tag filter elements */
   .tag-filter-bar {
     position: relative;
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 8px;
   }
 
   .tag-trigger-btn {
@@ -759,24 +732,38 @@
     font-weight: 600;
   }
 
-  .clear-tag-btn {
-    width: 22px;
-    height: 22px;
-    border-radius: 50%;
-    border: 1px solid var(--border-fine);
-    background: var(--bg-paper);
-    color: var(--text-muted);
+  .active-tag-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 36px;
+    padding: 0 12px;
+    background: var(--bg-card-hover);
+    border: 1.5px dashed var(--accent-ochre);
+    border-radius: 6px;
+    font-size: 12.5px;
+    color: var(--accent-ochre);
+    font-weight: 600;
+    font-family: var(--font-sans);
+  }
+
+  .clear-tag-btn-inline {
+    border: none;
+    background: transparent;
+    color: var(--accent-ochre);
+    font-size: 16px;
+    font-weight: bold;
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
     display: flex;
     align-items: center;
     justify-content: center;
-    cursor: pointer;
-    transition: all 0.2s ease;
+    transition: color 0.15s ease;
   }
 
-  .clear-tag-btn:hover {
-    background: #fee2e2;
-    border-color: #fca5a5;
-    color: #ef4444;
+  .clear-tag-btn-inline:hover {
+    color: var(--accent-terracotta);
   }
 
   /* Tag Popover Dropdown */
