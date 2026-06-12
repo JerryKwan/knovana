@@ -7,7 +7,7 @@ export class ApiKeyService {
 
   /**
    * Generates a new API Key for the user.
-   * Returns the raw key ONLY once.
+   * The full key is persisted and can be retrieved from the key list later.
    */
   async createKey(
     userId: string,
@@ -15,7 +15,7 @@ export class ApiKeyService {
   ): Promise<{
     id: string;
     name: string;
-    prefix: string;
+    key: string;
     raw_key: string;
     created_at: string;
   }> {
@@ -33,23 +33,38 @@ export class ApiKeyService {
       name: name.trim() || "Default API Key",
       key_hash: hash,
       prefix,
+      key_value: rawKey,
     });
 
     return {
       id: apiKey.id,
       name: apiKey.name,
-      prefix: apiKey.prefix,
+      key: rawKey,
       raw_key: rawKey,
       created_at: apiKey.created_at,
     };
   }
 
   /**
-   * Lists all active API Keys for the user, hiding their secure hashes.
+   * Lists all active API Keys for the user, including the stored full key value.
    */
-  async listKeys(userId: string): Promise<Omit<ApiKey, "key_hash">[]> {
+  async listKeys(
+    userId: string,
+  ): Promise<
+    Array<
+      Pick<ApiKey, "id" | "name" | "created_at" | "last_used_at"> & {
+        key: string | null;
+      }
+    >
+  > {
     const keys = this.repo.listByUser(userId);
-    return keys.map(({ key_hash: _key_hash, ...metadata }) => metadata);
+    return keys.map(({ id, name, key_value, created_at, last_used_at }) => ({
+      id,
+      name,
+      key: key_value ?? null,
+      created_at,
+      last_used_at,
+    }));
   }
 
   /**

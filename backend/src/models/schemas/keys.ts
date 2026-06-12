@@ -16,9 +16,9 @@ export const ApiKeyResponseSchema = z.object({
     description: "API Key 的描述性名称",
     example: "Chrome 扩展密钥",
   }),
-  prefix: z.string().openapi({
-    description: "API Key 的前缀，用于列表遮罩",
-    example: "sk-",
+  key: z.string().nullable().openapi({
+    description: "完整 API 密钥；历史密钥可能为 null",
+    example: "sk-F6fB97302482312b_secure_entropy_key",
   }),
   created_at: z.string().openapi({
     description: "密钥创建时间",
@@ -32,7 +32,7 @@ export const ApiKeyResponseSchema = z.object({
 
 export const CreateKeyResponseSchema = ApiKeyResponseSchema.extend({
   raw_key: z.string().openapi({
-    description: "生成的完整原始 API 密钥，仅此接口返回一次",
+    description: "生成的完整原始 API 密钥",
     example: "sk-F6fB97302482312b_secure_entropy_key",
   }),
 });

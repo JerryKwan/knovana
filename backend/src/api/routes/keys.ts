@@ -15,7 +15,7 @@ const listKeysRoute = createRoute({
   method: "get",
   path: "/",
   summary: "拉取密钥列表",
-  description: "拉取当前已登录用户创建的所有 API 密钥（遮罩形式安全显示）。",
+  description: "拉取当前已登录用户创建的所有 API 密钥（包含完整密钥值）。",
   responses: {
     200: {
       content: {
@@ -34,7 +34,7 @@ const createKeyRoute = createRoute({
   path: "/",
   summary: "创建新密钥",
   description:
-    "为当前用户生成一个新的 API 访问密钥，并返回明文密钥（仅此接口返回一次，请妥善保存）。",
+    "为当前用户生成一个新的 API 访问密钥，并返回完整密钥值（可在列表中再次查看）。",
   request: {
     body: {
       content: {
@@ -99,7 +99,7 @@ keysRoutes.openapi(createKeyRoute, async (c) => {
     {
       id: result.id,
       name: result.name,
-      prefix: result.prefix,
+      key: result.key,
       raw_key: result.raw_key,
       created_at: result.created_at,
     },

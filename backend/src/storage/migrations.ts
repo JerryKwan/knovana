@@ -89,6 +89,13 @@ export function runMigrations(): void {
       CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys(user_id);
     `);
 
+    // Persist full key value so users can retrieve it later from the dashboard.
+    try {
+      db.exec("ALTER TABLE api_keys ADD COLUMN key_value TEXT;");
+    } catch (err) {
+      // Ignore error if column already exists
+    }
+
     // 5. Claude Session Entries table for external session transcripts
     db.exec(`
       CREATE TABLE IF NOT EXISTS claude_session_entries (

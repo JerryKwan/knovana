@@ -28,16 +28,17 @@ describe("API Key Service & Repository Tests", () => {
     const keyResult = await keyService.createKey(userId, "Extension Key");
 
     expect(keyResult.id).toBeDefined();
-    expect(keyResult.prefix).toBe("sk-");
-    expect(keyResult.raw_key.startsWith("sk-")).toBe(true);
+    expect(keyResult.key.startsWith("sk-")).toBe(true);
+    expect(keyResult.raw_key).toBe(keyResult.key);
     expect(keyResult.name).toBe("Extension Key");
 
-    // Retrieve active keys list
+    // Retrieve active keys list with persisted full key value
     const keysList = await keyService.listKeys(userId);
     const key = keysList.find((k) => k.id === keyResult.id);
     expect(key).toBeDefined();
     expect(key?.name).toBe("Extension Key");
-    expect((key as any).key_hash).toBeUndefined(); // Should hide the hash!
+    expect(key?.key).toBe(keyResult.raw_key);
+    expect((key as any).key_hash).toBeUndefined();
   });
 
   it("Validates active keys and updates usage timestamp", async () => {

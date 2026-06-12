@@ -153,6 +153,7 @@ describe("Dashboard HTTP API Integration Tests", () => {
     expect(createData.id).toBeDefined();
     expect(createData.raw_key).toBeDefined();
     expect(createData.raw_key.startsWith("sk-")).toBe(true);
+    expect(createData.key).toBe(createData.raw_key);
 
     createdKeyId = createData.id;
 
@@ -168,6 +169,7 @@ describe("Dashboard HTTP API Integration Tests", () => {
     const listData = await listRes.json();
     expect(listData.keys.length).toBe(1);
     expect(listData.keys[0].name).toBe("Bob's Key");
+    expect(listData.keys[0].key).toBe(createData.raw_key);
   });
 
   it("8. Allows admin to list all keys in the system and revoke bob's key", async () => {

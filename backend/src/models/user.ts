@@ -14,6 +14,7 @@ export interface ApiKey {
   name: string;
   key_hash: string;
   prefix: string;
+  key_value?: string | null;
   created_at: string;
   last_used_at?: string | null;
 }

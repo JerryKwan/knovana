@@ -155,7 +155,10 @@ adminRoutes.openapi(updateUserStatusRoute, async (c) => {
 adminRoutes.openapi(listAllKeysRoute, async (c) => {
   const apiRepo = new ApiKeyRepository();
   const rawKeys = apiRepo.listAllKeys();
-  const keys = rawKeys.map(({ key_hash: _, ...k }) => k);
+  const keys = rawKeys.map(({ key_hash: _, prefix: __, key_value, ...k }) => ({
+    ...k,
+    key: key_value ?? null,
+  }));
   return c.json({ keys }, 200);
 });
 

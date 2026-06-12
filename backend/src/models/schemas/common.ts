@@ -57,7 +57,10 @@ export const ApiKeyListItemSchema = z.object({
   name: z
     .string()
     .openapi({ description: "密钥名称", example: "Chrome Extension Key" }),
-  prefix: z.string().openapi({ description: "密钥前缀", example: "sk-" }),
+  key: z.string().nullable().openapi({
+    description: "完整 API 密钥",
+    example: "sk-abcdef...",
+  }),
   created_at: z.string().openapi({
     description: "创建时间 (ISO 8601)",
     example: "2024-12-01T14:30:00Z",
@@ -83,9 +86,12 @@ export const ApiKeyCreateResponseSchema = z.object({
   name: z
     .string()
     .openapi({ description: "密钥名称", example: "Chrome Extension Key" }),
-  prefix: z.string().openapi({ description: "密钥前缀", example: "sk-" }),
+  key: z.string().openapi({
+    description: "完整 API 密钥",
+    example: "sk-abcdef...",
+  }),
   raw_key: z.string().openapi({
-    description: "生成的完整原始密钥（仅展示一次）",
+    description: "生成的完整原始密钥",
     example: "sk-abcdef...",
   }),
   created_at: z

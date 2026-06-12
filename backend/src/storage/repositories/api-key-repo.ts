@@ -7,7 +7,7 @@ export class ApiKeyRepository {
   create(apiKey: Omit<ApiKey, "created_at" | "last_used_at">): ApiKey {
     this.db
       .prepare(
-        "INSERT INTO api_keys (id, user_id, name, key_hash, prefix) VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO api_keys (id, user_id, name, key_hash, prefix, key_value) VALUES (?, ?, ?, ?, ?, ?)",
       )
       .run(
         apiKey.id,
@@ -15,6 +15,7 @@ export class ApiKeyRepository {
         apiKey.name,
         apiKey.key_hash,
         apiKey.prefix,
+        apiKey.key_value ?? null,
       );
 
     return this.get(apiKey.id)!;
