@@ -51,6 +51,69 @@
     return -1;
   });
 
+  // Auto scroll to bottom when messages or generation state changes
+  $effect(() => {
+    const msgCount = messages.length;
+    const isGenerating = generating;
+    const lastMsgContent = msgCount > 0 ? messages[msgCount - 1].content : '';
+    const lastMsgThinking = msgCount > 0 ? messages[msgCount - 1].thinking : '';
+    const lastMsgBlocks = msgCount > 0 ? (messages[msgCount - 1].blocks?.length || 0) : 0;
+    scrollToBottom();
+  });
+
+  // Svelte helpers for assistant blocks and placeholders
+  function shouldShowAssistantPlaceholder(msg: any): boolean {
+    if (msg.role !== 'assistant') return false;
+    const isStreaming = generating && messages[messages.length - 1]?.id === msg.id;
+    if (!isStreaming) return false;
+    if (msg.error) return false;
+
+    const hasText = msg.content && msg.content.trim().length > 0;
+    const hasThinking = msg.thinking && msg.thinking.trim().length > 0;
+    const hasBlocks = msg.blocks && msg.blocks.length > 0 && msg.blocks.some((b: any) => {
+      if (b.type === 'text' || b.type === 'thinking') {
+        return b.text && b.text.trim().length > 0;
+      }
+      if (b.type === 'tool_call') {
+        return b.name.trim().length > 0 || Object.keys(b.input).length > 0 || Boolean(b.partialJson?.trim());
+      }
+      return true;
+    });
+
+    return !hasText && !hasThinking && !hasBlocks;
+  }
+
+  function formatToolValue(content: unknown): string {
+    if (content === null || content === undefined) {
+      return '';
+    }
+    if (typeof content === 'string') {
+      return content.replace(/\r\n?/g, '\n');
+    }
+    if (
+      typeof content === 'number' ||
+      typeof content === 'boolean' ||
+      typeof content === 'bigint'
+    ) {
+      return String(content);
+    }
+    try {
+      return JSON.stringify(content, null, 2).replace(/\r\n?/g, '\n');
+    } catch {
+      return String(content).replace(/\r\n?/g, '\n');
+    }
+  }
+
+  function hasToolResultContent(content: unknown): boolean {
+    if (content === null || content === undefined) {
+      return false;
+    }
+    if (typeof content === 'string') {
+      return content.length > 0;
+    }
+    return true;
+  }
+
   // Scroll helper
   async function scrollToBottom() {
     if (chatHistoryEl) {
@@ -164,7 +227,10 @@
     try {
       const res = await apiRequest<{ title: string, messages: any[] }>('GET', `/api/v1/chat/sessions/${sessionId}`);
       sessionTitle = res.title || "智能会话";
-      messages = res.messages || [];
+      messages = (res.messages || []).map((m: any) => ({
+        ...m,
+        blocks: m.role === 'assistant' ? [{ type: 'text', text: m.content || "" }] : undefined
+      }));
       scrollToBottom();
     } catch (err) {
       console.error("Failed to load session details", err);
@@ -214,6 +280,22 @@
     let assistantMsgId = "";
     let contentBlocks: any[] = [];
     
+    function updateAssistantBlocks() {
+      const index = messages.findIndex(m => m.id === assistantMsgId);
+      if (index !== -1) {
+        messages[index].blocks = [...contentBlocks.filter(Boolean)];
+        messages[index].content = contentBlocks
+          .filter(b => b && b.type === "text" && b.text)
+          .map(b => b.text)
+          .join("");
+        messages[index].thinking = contentBlocks
+          .filter(b => b && b.type === "thinking" && b.text)
+          .map(b => b.text)
+          .join("");
+        messages = [...messages];
+      }
+    }
+    
     try {
       const body: any = { message: userText };
       if (activeSessionId) {
@@ -242,7 +324,8 @@
             role: "assistant",
             content: "",
             created_at: new Date().toISOString(),
-            thinking: ""
+            thinking: "",
+            blocks: []
           }];
           statusText = "思考中...";
           statusIndicator = "thinking";
@@ -256,56 +339,125 @@
           statusIndicator = chunk.indicator || "thinking";
         } else if (chunk.type === "content_block_start") {
           const idx = chunk.index;
-          contentBlocks[idx] = chunk.content_block;
           const cb = chunk.content_block || {};
+          let newBlock: any;
           if (cb.type === "tool_call") {
+            newBlock = {
+              type: "tool_call",
+              id: cb.id,
+              name: cb.name,
+              input: cb.input || {},
+              partialJson: ""
+            };
             statusText = `正在执行工具 ${cb.name}...`;
             statusIndicator = "tool";
+          } else if (cb.type === "tool_result") {
+            newBlock = {
+              type: "tool_result",
+              tool_call_id: cb.tool_call_id,
+              status: cb.status || "success",
+              content: cb.content
+            };
           } else if (cb.type === "text") {
+            newBlock = {
+              type: "text",
+              text: ""
+            };
             statusText = "正在生成回复...";
             statusIndicator = "thinking";
           } else if (cb.type === "thinking") {
+            newBlock = {
+              type: "thinking",
+              text: ""
+            };
             statusText = "思考中...";
             statusIndicator = "thinking";
+          } else if (cb.type === "widget") {
+            newBlock = {
+              type: "widget",
+              widget_type: cb.widget_type,
+              data: cb.data
+            };
           }
+          contentBlocks[idx] = newBlock;
+          updateAssistantBlocks();
         } else if (chunk.type === "content_block_delta") {
           const idx = chunk.index;
-          const delta = chunk.delta;
-          
-          if (delta.type === "text_delta" && delta.text) {
-            if (!contentBlocks[idx]) contentBlocks[idx] = { type: "text", text: "" };
-            contentBlocks[idx].text += delta.text;
-            statusText = "正在生成回复...";
-            statusIndicator = "thinking";
-            updateAssistantContent();
-          } else if (delta.type === "thinking_delta" && delta.text) {
-            if (!contentBlocks[idx]) contentBlocks[idx] = { type: "thinking", text: "" };
-            contentBlocks[idx].text += delta.text;
-            statusText = "思考中...";
-            statusIndicator = "thinking";
-            updateAssistantThinking();
-          } else if (delta.type === "input_json_delta") {
-            if (!contentBlocks[idx]) contentBlocks[idx] = { type: "tool_call", name: "", partialJson: "" };
-            const cb = contentBlocks[idx];
-            statusText = cb.name ? `正在执行工具 ${cb.name}...` : "正在准备工具调用...";
-            statusIndicator = "tool";
+          const delta = chunk.delta || {};
+          let block = contentBlocks[idx];
+          if (!block) {
+            if (delta.type === "text_delta") {
+              block = { type: "text", text: "" };
+            } else if (delta.type === "thinking_delta") {
+              block = { type: "thinking", text: "" };
+            } else if (delta.type === "input_json_delta") {
+              block = { type: "tool_call", id: "", name: "", input: {}, partialJson: "" };
+            }
+            contentBlocks[idx] = block;
+          }
+          if (block) {
+            if (block.type === "text" && delta.type === "text_delta") {
+              block.text = (block.text || "") + (delta.text || "");
+              statusText = "正在生成回复...";
+              statusIndicator = "thinking";
+            } else if (block.type === "thinking" && delta.type === "thinking_delta") {
+              block.text = (block.text || "") + (delta.text || "");
+              statusText = "思考中...";
+              statusIndicator = "thinking";
+            } else if (block.type === "tool_call" && delta.type === "input_json_delta") {
+              block.partialJson = (block.partialJson || "") + (delta.partial_json || "");
+              try {
+                block.input = JSON.parse(block.partialJson);
+              } catch {}
+              statusText = block.name ? `正在执行工具 ${block.name}...` : "正在准备工具调用...";
+              statusIndicator = "tool";
+            }
+            contentBlocks[idx] = block;
+            updateAssistantBlocks();
           }
         } else if (chunk.type === "content_block_stop") {
           const idx = chunk.index;
-          contentBlocks[idx] = chunk.content_block;
           const cb = chunk.content_block || {};
+          let block = contentBlocks[idx];
           if (cb.type === "tool_call") {
+            block = {
+              type: "tool_call",
+              id: cb.id,
+              name: cb.name,
+              input: cb.input || {}
+            };
             statusText = "思考中...";
             statusIndicator = "thinking";
+          } else if (cb.type === "tool_result") {
+            block = {
+              type: "tool_result",
+              tool_call_id: cb.tool_call_id,
+              status: cb.status || "success",
+              content: cb.content
+            };
           } else if (cb.type === "text") {
+            block = {
+              type: "text",
+              text: cb.text || ""
+            };
             statusText = "正在生成回复...";
             statusIndicator = "thinking";
           } else if (cb.type === "thinking") {
+            block = {
+              type: "thinking",
+              text: cb.text || ""
+            };
             statusText = "思考中...";
             statusIndicator = "thinking";
+          } else if (cb.type === "widget") {
+            block = {
+              type: "widget",
+              widget_type: cb.widget_type,
+              data: cb.data
+            };
           }
-          updateAssistantContent();
-          updateAssistantThinking();
+          contentBlocks[idx] = block;
+          updateAssistantBlocks();
         } else if (chunk.type === "message_end") {
           statusText = "";
         } else if (chunk.type === "error") {
@@ -319,34 +471,6 @@
     } finally {
       generating = false;
       await loadSessions();
-    }
-    
-    function updateAssistantContent() {
-      const texts = contentBlocks
-        .filter(b => b && b.type === "text" && b.text)
-        .map(b => b.text)
-        .join("");
-        
-      const index = messages.findIndex(m => m.id === assistantMsgId);
-      if (index !== -1) {
-        messages[index].content = texts;
-        messages = [...messages];
-        scrollToBottom();
-      }
-    }
-    
-    function updateAssistantThinking() {
-      const thinkings = contentBlocks
-        .filter(b => b && b.type === "thinking" && b.text)
-        .map(b => b.text)
-        .join("");
-        
-      const index = messages.findIndex(m => m.id === assistantMsgId);
-      if (index !== -1) {
-        messages[index].thinking = thinkings;
-        messages = [...messages];
-        scrollToBottom();
-      }
     }
   }
 
@@ -365,6 +489,22 @@
     
     let assistantMsgId = "";
     let contentBlocks: any[] = [];
+    
+    function updateAssistantBlocks() {
+      const index = messages.findIndex(m => m.id === assistantMsgId);
+      if (index !== -1) {
+        messages[index].blocks = [...contentBlocks.filter(Boolean)];
+        messages[index].content = contentBlocks
+          .filter(b => b && b.type === "text" && b.text)
+          .map(b => b.text)
+          .join("");
+        messages[index].thinking = contentBlocks
+          .filter(b => b && b.type === "thinking" && b.text)
+          .map(b => b.text)
+          .join("");
+        messages = [...messages];
+      }
+    }
     
     try {
       const tokenHeader = token ? `Bearer ${token}` : "";
@@ -389,7 +529,8 @@
             role: "assistant",
             content: "",
             created_at: new Date().toISOString(),
-            thinking: ""
+            thinking: "",
+            blocks: []
           }];
           statusText = "思考中...";
           statusIndicator = "thinking";
@@ -398,56 +539,125 @@
           statusIndicator = chunk.indicator || "thinking";
         } else if (chunk.type === "content_block_start") {
           const idx = chunk.index;
-          contentBlocks[idx] = chunk.content_block;
           const cb = chunk.content_block || {};
+          let newBlock: any;
           if (cb.type === "tool_call") {
+            newBlock = {
+              type: "tool_call",
+              id: cb.id,
+              name: cb.name,
+              input: cb.input || {},
+              partialJson: ""
+            };
             statusText = `正在执行工具 ${cb.name}...`;
             statusIndicator = "tool";
+          } else if (cb.type === "tool_result") {
+            newBlock = {
+              type: "tool_result",
+              tool_call_id: cb.tool_call_id,
+              status: cb.status || "success",
+              content: cb.content
+            };
           } else if (cb.type === "text") {
+            newBlock = {
+              type: "text",
+              text: ""
+            };
             statusText = "正在生成回复...";
             statusIndicator = "thinking";
           } else if (cb.type === "thinking") {
+            newBlock = {
+              type: "thinking",
+              text: ""
+            };
             statusText = "思考中...";
             statusIndicator = "thinking";
+          } else if (cb.type === "widget") {
+            newBlock = {
+              type: "widget",
+              widget_type: cb.widget_type,
+              data: cb.data
+            };
           }
+          contentBlocks[idx] = newBlock;
+          updateAssistantBlocks();
         } else if (chunk.type === "content_block_delta") {
           const idx = chunk.index;
-          const delta = chunk.delta;
-          
-          if (delta.type === "text_delta" && delta.text) {
-            if (!contentBlocks[idx]) contentBlocks[idx] = { type: "text", text: "" };
-            contentBlocks[idx].text += delta.text;
-            statusText = "正在生成回复...";
-            statusIndicator = "thinking";
-            updateAssistantContent();
-          } else if (delta.type === "thinking_delta" && delta.text) {
-            if (!contentBlocks[idx]) contentBlocks[idx] = { type: "thinking", text: "" };
-            contentBlocks[idx].text += delta.text;
-            statusText = "思考中...";
-            statusIndicator = "thinking";
-            updateAssistantThinking();
-          } else if (delta.type === "input_json_delta") {
-            if (!contentBlocks[idx]) contentBlocks[idx] = { type: "tool_call", name: "", partialJson: "" };
-            const cb = contentBlocks[idx];
-            statusText = cb.name ? `正在执行工具 ${cb.name}...` : "正在准备工具调用...";
-            statusIndicator = "tool";
+          const delta = chunk.delta || {};
+          let block = contentBlocks[idx];
+          if (!block) {
+            if (delta.type === "text_delta") {
+              block = { type: "text", text: "" };
+            } else if (delta.type === "thinking_delta") {
+              block = { type: "thinking", text: "" };
+            } else if (delta.type === "input_json_delta") {
+              block = { type: "tool_call", id: "", name: "", input: {}, partialJson: "" };
+            }
+            contentBlocks[idx] = block;
+          }
+          if (block) {
+            if (block.type === "text" && delta.type === "text_delta") {
+              block.text = (block.text || "") + (delta.text || "");
+              statusText = "正在生成回复...";
+              statusIndicator = "thinking";
+            } else if (block.type === "thinking" && delta.type === "thinking_delta") {
+              block.text = (block.text || "") + (delta.text || "");
+              statusText = "思考中...";
+              statusIndicator = "thinking";
+            } else if (block.type === "tool_call" && delta.type === "input_json_delta") {
+              block.partialJson = (block.partialJson || "") + (delta.partial_json || "");
+              try {
+                block.input = JSON.parse(block.partialJson);
+              } catch {}
+              statusText = block.name ? `正在执行工具 ${block.name}...` : "正在准备工具调用...";
+              statusIndicator = "tool";
+            }
+            contentBlocks[idx] = block;
+            updateAssistantBlocks();
           }
         } else if (chunk.type === "content_block_stop") {
           const idx = chunk.index;
-          contentBlocks[idx] = chunk.content_block;
           const cb = chunk.content_block || {};
+          let block = contentBlocks[idx];
           if (cb.type === "tool_call") {
+            block = {
+              type: "tool_call",
+              id: cb.id,
+              name: cb.name,
+              input: cb.input || {}
+            };
             statusText = "思考中...";
             statusIndicator = "thinking";
+          } else if (cb.type === "tool_result") {
+            block = {
+              type: "tool_result",
+              tool_call_id: cb.tool_call_id,
+              status: cb.status || "success",
+              content: cb.content
+            };
           } else if (cb.type === "text") {
+            block = {
+              type: "text",
+              text: cb.text || ""
+            };
             statusText = "正在生成回复...";
             statusIndicator = "thinking";
           } else if (cb.type === "thinking") {
+            block = {
+              type: "thinking",
+              text: cb.text || ""
+            };
             statusText = "思考中...";
             statusIndicator = "thinking";
+          } else if (cb.type === "widget") {
+            block = {
+              type: "widget",
+              widget_type: cb.widget_type,
+              data: cb.data
+            };
           }
-          updateAssistantContent();
-          updateAssistantThinking();
+          contentBlocks[idx] = block;
+          updateAssistantBlocks();
         } else if (chunk.type === "message_end") {
           statusText = "";
         } else if (chunk.type === "error") {
@@ -460,34 +670,6 @@
       statusText = `重新生成回答失败: ${err.message || "未知网络错误"}`;
     } finally {
       generating = false;
-    }
-    
-    function updateAssistantContent() {
-      const texts = contentBlocks
-        .filter(b => b && b.type === "text" && b.text)
-        .map(b => b.text)
-        .join("");
-        
-      const index = messages.findIndex(m => m.id === assistantMsgId);
-      if (index !== -1) {
-        messages[index].content = texts;
-        messages = [...messages];
-        scrollToBottom();
-      }
-    }
-    
-    function updateAssistantThinking() {
-      const thinkings = contentBlocks
-        .filter(b => b && b.type === "thinking" && b.text)
-        .map(b => b.text)
-        .join("");
-        
-      const index = messages.findIndex(m => m.id === assistantMsgId);
-      if (index !== -1) {
-        messages[index].thinking = thinkings;
-        messages = [...messages];
-        scrollToBottom();
-      }
     }
   }
 
@@ -887,104 +1069,13 @@
                 <div class="messages-list">
                   {#each messages as msg, index (msg.id || index)}
                     <div class="message-row {msg.role}">
-                      <!-- Vector Avatars -->
-                      <div class="message-avatar {msg.role}">
-                        {#if msg.role === 'user'}
-                          <svg class="avatar-user-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/>
-                            <circle cx="12" cy="7" r="4"/>
-                          </svg>
-                        {:else}
-                          <svg class="avatar-k-svg" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <defs>
-                              <linearGradient id="avatarStemGrad" x1="34" y1="25" x2="58" y2="103" gradientUnits="userSpaceOnUse">
-                                <stop offset="0" stop-color="#1E40AF" />
-                                <stop offset="1" stop-color="#1D3082" />
-                              </linearGradient>
-                              <linearGradient id="avatarSpineBevel" x1="34" y1="64" x2="43" y2="64" gradientUnits="userSpaceOnUse">
-                                <stop offset="0" stop-color="#0F1F5C" stop-opacity="0.30" />
-                                <stop offset="0.42" stop-color="#142C82" stop-opacity="0.14" />
-                                <stop offset="1" stop-color="#142C82" stop-opacity="0" />
-                              </linearGradient>
-                              <linearGradient id="avatarSpineInnerLight" x1="54" y1="64" x2="58" y2="64" gradientUnits="userSpaceOnUse">
-                                <stop offset="0" stop-color="#FFFFFF" stop-opacity="0" />
-                                <stop offset="1" stop-color="#FFFFFF" stop-opacity="0.13" />
-                              </linearGradient>
-                              <linearGradient id="avatarFaceTop" x1="58" y1="64" x2="102" y2="19" gradientUnits="userSpaceOnUse">
-                                <stop offset="0" stop-color="#1D4FD7" />
-                                <stop offset="0.6" stop-color="#2D6FE8" />
-                                <stop offset="1" stop-color="#5B9CF5" />
-                              </linearGradient>
-                              <linearGradient id="avatarFaceBot" x1="58" y1="65" x2="102" y2="109" gradientUnits="userSpaceOnUse">
-                                <stop offset="0" stop-color="#0C8B7F" />
-                                <stop offset="0.55" stop-color="#0E9B89" />
-                                <stop offset="1" stop-color="#0FB87E" />
-                              </linearGradient>
-                            </defs>
-                            <g>
-                              <rect x="34" y="26" width="24" height="76" rx="1.5" fill="url(#avatarStemGrad)" />
-                              <rect x="34.5" y="27" width="8.5" height="74" rx="1.1" fill="url(#avatarSpineBevel)" />
-                              <rect x="53.5" y="27" width="4" height="74" rx="1.1" fill="url(#avatarSpineInnerLight)" />
-                              <polygon points="58,64 76,28 90,28 108,42 82,64" fill="url(#avatarFaceTop)" />
-                              <polygon points="60,60 76,30 88,30 76,48" fill="white" opacity="0.10" />
-                              <polygon points="58,65 82,65 108,86 90,100 76,100" fill="url(#avatarFaceBot)" />
-                              <polygon points="60,67 76,67 84,76 68,88" fill="white" opacity="0.08" />
-                              <line x1="58" y1="64.5" x2="82" y2="64.5" stroke="#0F2E5C" stroke-width="1" opacity="0.20" />
-                            </g>
-                          </svg>
-                        {/if}
-                      </div>
-
-                      <div class="message-content-wrapper">
-                        <!-- Thinking details accordion (Extension style) -->
-                        {#if msg.role === 'assistant' && msg.thinking}
-                          <details class="block-thinking" open={generating && messages[messages.length-1].id === msg.id}>
-                            <summary class="thinking-header">
-                              <span class="thinking-title">
-                                <svg class="thinking-brain-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                  <path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96-.44 2.5 2.5 0 0 1 0-3.12 3 3 0 0 1 0-4.88 2.5 2.5 0 0 1 0-3.12A2.5 2.5 0 0 1 9.5 2Z"/>
-                                  <path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96-.44 2.5 2.5 0 0 0 0-3.12 3 3 0 0 0 0-4.88 2.5 2.5 0 0 0 0-3.12A2.5 2.5 0 0 0 14.5 2Z"/>
-                                </svg>
-                                <span>思考过程</span>
-                              </span>
-                              <span class="thinking-hint">
-                                <span>{(generating && messages[messages.length-1].id === msg.id) ? '思考中' : '详情'}</span>
-                                <svg class="thinking-chevron-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                                  <polyline points="9 18 15 12 9 6"/>
-                                </svg>
-                              </span>
-                            </summary>
-                            <div class="thinking-content">
-                              {msg.thinking}
-                            </div>
-                          </details>
-                        {/if}
-                        
-                        <!-- Main Chat Bubble -->
-                        <div class="message-bubble">
-                          {#if msg.role === 'user'}
+                      {#if msg.role === 'user'}
+                        <div class="message-content-wrapper">
+                          <div class="message-bubble">
                             <p style="white-space: pre-wrap; margin: 0;">{msg.content}</p>
-                          {:else}
-                            <div class="markdown-rich-content">
-                              {@html renderMarkdown(msg.content)}
-                            </div>
-                          {/if}
-                        </div>
-
-                        <!-- Status Rail (Shown under assistant bubble during streaming even when content has started generating) -->
-                        {#if msg.role === 'assistant' && generating && messages[messages.length-1].id === msg.id}
-                          <div class="status-tail streaming">
-                            {#if statusIndicator === 'tool'}
-                              <span class="tool-icon-spinning">⚙️</span>
-                            {:else}
-                              <span class="pulse-dot"></span>
-                            {/if}
-                            <span>{statusText || "正在回复中..."}</span>
                           </div>
-                        {/if}
-
-                        <!-- Action Bar for Copy / Export / Regenerate -->
-                        {#if msg.role === 'user'}
+                          
+                          <!-- Action Bar for Copy / Export / Regenerate -->
                           <div class="message-actions user-actions">
                             <button
                               type="button"
@@ -1017,37 +1108,194 @@
                               </button>
                             {/if}
                           </div>
-                        {:else if msg.content || msg.thinking}
-                          <div class="message-actions assistant-actions">
-                            <button
-                              type="button"
-                              class="action-button"
-                              title="复制内容"
-                              onclick={() => copyMessage(msg.id, msg.content)}
-                            >
-                              {#if copiedMessageId === msg.id}
-                                <span class="copied-feedback">✓</span>
-                              {:else}
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                              {/if}
-                            </button>
-                            <button
-                              type="button"
-                              class="action-button"
-                              title="导出消息"
-                              onclick={() => exportMessage(msg.role, msg.content)}
-                            >
-                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
-                            </button>
+                        </div>
+                      {:else}
+                        <div class="assistant-message-container">
+                          <div class="message-header">
+                            <div class="avatar assistant">
+                              <svg class="avatar-k-svg" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <defs>
+                                  <linearGradient id="avatarStemGrad" x1="34" y1="25" x2="58" y2="103" gradientUnits="userSpaceOnUse">
+                                    <stop offset="0" stop-color="#1E40AF" />
+                                    <stop offset="1" stop-color="#1D3082" />
+                                  </linearGradient>
+                                  <linearGradient id="avatarSpineBevel" x1="34" y1="64" x2="43" y2="64" gradientUnits="userSpaceOnUse">
+                                    <stop offset="0" stop-color="#0F1F5C" stop-opacity="0.30" />
+                                    <stop offset="0.42" stop-color="#142C82" stop-opacity="0.14" />
+                                    <stop offset="1" stop-color="#142C82" stop-opacity="0" />
+                                  </linearGradient>
+                                  <linearGradient id="avatarSpineInnerLight" x1="54" y1="64" x2="58" y2="64" gradientUnits="userSpaceOnUse">
+                                    <stop offset="0" stop-color="#FFFFFF" stop-opacity="0" />
+                                    <stop offset="1" stop-color="#FFFFFF" stop-opacity="0.13" />
+                                  </linearGradient>
+                                  <linearGradient id="avatarFaceTop" x1="58" y1="64" x2="102" y2="19" gradientUnits="userSpaceOnUse">
+                                    <stop offset="0" stop-color="#1D4FD7" />
+                                    <stop offset="0.6" stop-color="#2D6FE8" />
+                                    <stop offset="1" stop-color="#5B9CF5" />
+                                  </linearGradient>
+                                  <linearGradient id="avatarFaceBot" x1="58" y1="65" x2="102" y2="109" gradientUnits="userSpaceOnUse">
+                                    <stop offset="0" stop-color="#0C8B7F" />
+                                    <stop offset="0.55" stop-color="#0E9B89" />
+                                    <stop offset="1" stop-color="#0FB87E" />
+                                  </linearGradient>
+                                </defs>
+                                <g>
+                                  <rect x="34" y="26" width="24" height="76" rx="1.5" fill="url(#avatarStemGrad)" />
+                                  <rect x="34.5" y="27" width="8.5" height="74" rx="1.1" fill="url(#avatarSpineBevel)" />
+                                  <rect x="53.5" y="27" width="4" height="74" rx="1.1" fill="url(#avatarSpineInnerLight)" />
+                                  <polygon points="58,64 76,28 90,28 108,42 82,64" fill="url(#avatarFaceTop)" />
+                                  <polygon points="60,60 76,30 88,30 76,48" fill="white" opacity="0.10" />
+                                  <polygon points="58,65 82,65 108,86 90,100 76,100" fill="url(#avatarFaceBot)" />
+                                  <polygon points="60,67 76,67 84,76 68,88" fill="white" opacity="0.08" />
+                                  <line x1="58" y1="64.5" x2="82" y2="64.5" stroke="#0F2E5C" stroke-width="1" opacity="0.20" />
+                                </g>
+                              </svg>
+                            </div>
+                            <span class="sender-name">Knovana</span>
                           </div>
-                        {/if}
-                      </div>
+                          
+                          <div class="message-bubble">
+                            {#if shouldShowAssistantPlaceholder(msg)}
+                              <div class="assistant-placeholder" aria-label="准备中">
+                                <span></span>
+                                <span></span>
+                                <span></span>
+                              </div>
+                            {:else}
+                              {#each (msg.blocks || [{ type: 'text', text: msg.content || "" }]) as block, bIdx (bIdx)}
+                                {#if block.type === 'text'}
+                                  {#if block.text}
+                                    <div class="markdown-rich-content">
+                                      {@html renderMarkdown(block.text)}
+                                    </div>
+                                  {/if}
+                                {:else}
+                                  {#if block.type === 'thinking'}
+                                    {#if block.text}
+                                      <details class="block-thinking" open={generating && messages[messages.length-1].id === msg.id}>
+                                        <summary class="thinking-header">
+                                          <span class="thinking-title">
+                                            <svg class="thinking-brain-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                              <path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/>
+                                              <path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/>
+                                              <path d="M12 5V4a2 2 0 0 0-2-2h0a2 2 0 0 0-2 2v1"/>
+                                              <path d="M12 5v14"/>
+                                              <path d="M12 19v1a2 2 0 0 0 2 2h0a2 2 0 0 0 2-2v-1"/>
+                                              <path d="M18 10a2 2 0 0 0 2-2h0a2 2 0 0 0-2-2"/>
+                                              <path d="M6 10a2 2 0 0 1-2-2h0a2 2 0 0 1 2-2"/>
+                                            </svg>
+                                            <span>思考过程</span>
+                                          </span>
+                                          <span class="thinking-hint">
+                                            <span>{(generating && messages[messages.length-1].id === msg.id) ? '思考中' : '详情'}</span>
+                                            <svg class="thinking-chevron-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                              <polyline points="9 18 15 12 9 6"/>
+                                            </svg>
+                                          </span>
+                                        </summary>
+                                        <div class="thinking-content">
+                                          {block.text}
+                                        </div>
+                                      </details>
+                                    {/if}
+                                  {:else if block.type === 'tool_call'}
+                                    <div class="block-tool-call">
+                                      <div class="tool-call-header">
+                                        <svg class="tool-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                          <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
+                                        </svg>
+                                        <span>执行工具: <code class="tool-name">{block.name}</code></span>
+                                      </div>
+                                      {#if block.input && Object.keys(block.input).length > 0}
+                                        <pre class="tool-call-input kn-scrollbar"><code>{formatToolValue(block.input)}</code></pre>
+                                      {:else if block.partialJson}
+                                        <pre class="tool-call-input kn-scrollbar"><code>{formatToolValue(block.partialJson)}</code></pre>
+                                      {/if}
+                                    </div>
+                                  {:else if block.type === 'tool_result'}
+                                    <div class="block-tool-result" class:error={block.status === 'error'}>
+                                      <div class="tool-result-header">
+                                        <span class="result-icon" class:error={block.status === 'error'}>
+                                          {#if block.status === 'error'}
+                                            <svg class="tool-result-error-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                              <circle cx="12" cy="12" r="10"/>
+                                              <path d="m15 9-6 6"/>
+                                              <path d="m9 9 6 6"/>
+                                            </svg>
+                                          {:else}
+                                            <svg class="tool-result-success-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                              <circle cx="12" cy="12" r="10"/>
+                                              <path d="m9 12 2 2 4-4"/>
+                                            </svg>
+                                          {/if}
+                                        </span>
+                                        <span>工具返回结果 <span class="status-pill" class:error={block.status === 'error'}>{block.status}</span></span>
+                                      </div>
+                                      {#if hasToolResultContent(block.content)}
+                                        <pre class="tool-result-output kn-scrollbar"><code>{formatToolValue(block.content)}</code></pre>
+                                      {:else}
+                                        <div class="tool-result-empty">无返回内容</div>
+                                      {/if}
+                                    </div>
+                                  {:else if block.type === 'widget'}
+                                    <div class="block-widget">
+                                      <div class="widget-header">
+                                        <span class="widget-icon">🧩</span>
+                                        <span>组件: {block.widget_type}</span>
+                                      </div>
+                                      <pre class="widget-data kn-scrollbar"><code>{formatToolValue(block.data)}</code></pre>
+                                    </div>
+                                  {/if}
+                                {/if}
+                              {/each}
+                            {/if}
+                          </div>
+                          
+                          <!-- Status Rail (Shown under assistant bubble during streaming even when content has started generating) -->
+                          {#if msg.role === 'assistant' && generating && messages[messages.length-1].id === msg.id}
+                            <div class="status-tail streaming">
+                              {#if statusIndicator === 'tool'}
+                                <span class="tool-icon-spinning">⚙️</span>
+                              {:else}
+                                <span class="pulse-dot"></span>
+                              {/if}
+                              <span>{statusText || "正在回复中..."}</span>
+                            </div>
+                          {/if}
+                          
+                          <!-- Action Bar for Copy / Export -->
+                          {#if msg.content || (msg.blocks && msg.blocks.length > 0)}
+                            <div class="message-actions assistant-actions">
+                              <button
+                                type="button"
+                                class="action-button"
+                                title="复制内容"
+                                onclick={() => copyMessage(msg.id, msg.content)}
+                              >
+                                {#if copiedMessageId === msg.id}
+                                  <span class="copied-feedback">✓</span>
+                                {:else}
+                                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                                {/if}
+                              </button>
+                              <button
+                                type="button"
+                                class="action-button"
+                                title="导出消息"
+                                onclick={() => exportMessage(msg.role, msg.content)}
+                              >
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+                              </button>
+                            </div>
+                          {/if}
+                        </div>
+                      {/if}
                     </div>
                   {/each}
                 </div>
               {/if}
             </div>
-
+ 
             <!-- Composer Input Area -->
             <div class="composer-container">
               <div class="composer-card">
@@ -1064,14 +1312,7 @@
                   }}
                 ></textarea>
                 <div class="composer-toolbar">
-                  <div class="toolbar-left">
-                    <!-- Regenerate fallback button inside composer if assistant answer was deleted -->
-                    {#if isLastMessageAssistant() && !generating}
-                      <button class="widget-btn-small" onclick={regenerateLastResponse}>
-                        🔄 重新生成回答
-                      </button>
-                    {/if}
-                  </div>
+                  <div class="toolbar-left"></div>
                   <div class="toolbar-right">
                     <button 
                       class="widget-send-btn" 
@@ -1514,21 +1755,283 @@
 
   /* Refined Bubble borders and backgrounds */
   .message-row.user .message-bubble {
-    background: #fdfaf7; /* soft paper peach */
+    background: var(--bg-card);
     color: var(--text-ink);
-    border: 1px solid var(--accent-ochre); /* terracotta thin border */
-    border-top-right-radius: 2px;
+    border: none;
+    border-radius: 14px 14px 2px 14px;
     text-align: left;
-    box-shadow: 0 1px 3px rgba(178, 90, 56, 0.03);
+    box-shadow: none;
+  }
+
+  .message-row.assistant {
+    width: 100%;
+  }
+
+  .assistant-message-container {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    width: 100%;
+  }
+
+  .message-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 2px;
+  }
+
+  .avatar.assistant {
+    display: flex;
+    width: 20px;
+    height: 20px;
+    align-items: center;
+    justify-content: center;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--accent-ochre);
+  }
+
+  .avatar-k-svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  .sender-name {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    letter-spacing: 0.02em;
   }
 
   .message-row.assistant .message-bubble {
     background: #ffffff; /* pure white card */
     color: var(--text-ink);
-    border: 1px dashed var(--border-fine); /* clean dashed ink border */
-    border-top-left-radius: 2px;
+    border: 1px solid var(--border-fine); /* solid border */
+    border-radius: 12px;
     box-shadow: 0 1px 3px rgba(28, 28, 26, 0.01);
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
   }
+
+  /* Tool Call Block Styles */
+  .block-tool-call {
+    margin: 6px 0;
+    border: 1px solid var(--border-fine);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--accent-ochre) 3%, var(--bg-paper));
+    overflow: hidden;
+    width: 100%;
+  }
+
+  .tool-call-header {
+    padding: 6px 10px;
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--text-ink);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    border-bottom: 1px dashed var(--border-fine);
+  }
+
+  .tool-call-header svg {
+    flex: 0 0 auto;
+    color: var(--accent-ochre);
+    width: 13px;
+    height: 13px;
+  }
+
+  .tool-name {
+    font-family: monospace;
+    background: var(--bg-card);
+    padding: 1px 5px;
+    border-radius: 4px;
+    color: var(--accent-ochre);
+  }
+
+  .tool-call-input {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    margin: 0;
+    padding: 8px 10px;
+    font-size: 11px;
+    background: var(--bg-card);
+    max-height: 120px;
+    overflow: auto;
+    font-family: monospace;
+    line-height: 1.6;
+    tab-size: 2;
+    white-space: pre;
+  }
+
+  /* Tool Result Block Styles */
+  .block-tool-result {
+    margin: 6px 0;
+    border: 1px solid var(--border-fine);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--accent-ochre) 1.5%, var(--bg-paper));
+    overflow: hidden;
+    width: 100%;
+  }
+
+  .block-tool-result.error {
+    border-color: #fca5a5;
+    background: #fff5f5;
+  }
+
+  .tool-result-header {
+    padding: 6px 10px;
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--text-ink);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    border-bottom: 1px dashed var(--border-fine);
+  }
+
+  .result-icon {
+    display: inline-flex;
+    flex: 0 0 auto;
+    color: var(--accent-sage);
+  }
+
+  .result-icon.error {
+    color: #ef4444;
+  }
+
+  .result-icon svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  .status-pill {
+    font-size: 9.5px;
+    padding: 1px 4px;
+    border-radius: 4px;
+    background: rgba(178, 90, 56, 0.1);
+    color: var(--text-muted);
+    text-transform: uppercase;
+  }
+
+  .status-pill.error {
+    background: rgba(239, 68, 68, 0.1);
+    color: #ef4444;
+  }
+
+  .tool-result-output {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    margin: 0;
+    padding: 10px 12px 12px;
+    background: var(--bg-card);
+    max-height: 250px;
+    overflow: auto;
+    border-top: 1px dashed var(--border-fine);
+    font-family: monospace;
+    font-size: 11.5px;
+    line-height: 1.65;
+    tab-size: 2;
+    white-space: pre;
+  }
+
+  .tool-result-output code,
+  .tool-call-input code,
+  .widget-data code {
+    white-space: inherit;
+  }
+
+  .tool-result-empty {
+    padding: 10px 12px;
+    border-top: 1px dashed var(--border-fine);
+    color: var(--text-muted);
+    font-size: 12px;
+  }
+
+  /* Widget Block Styles */
+  .block-widget {
+    margin: 6px 0;
+    border: 1px solid var(--border-fine);
+    border-radius: 8px;
+    background: var(--bg-card);
+    overflow: hidden;
+    width: 100%;
+  }
+
+  .widget-data {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    margin: 0;
+    padding: 8px 10px;
+    font-size: 11px;
+    background: var(--bg-card);
+    max-height: 150px;
+    overflow: auto;
+    font-family: monospace;
+    line-height: 1.6;
+    tab-size: 2;
+    white-space: pre;
+  }
+
+  /* Assistant pulsing placeholder style */
+  .assistant-placeholder {
+    display: inline-flex;
+    min-height: 24px;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 1px;
+  }
+
+  .assistant-placeholder span {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--text-muted);
+    animation: placeholderPulse 1.1s ease-in-out infinite;
+  }
+
+  .assistant-placeholder span:nth-child(2) {
+    animation-delay: 120ms;
+  }
+
+  .assistant-placeholder span:nth-child(3) {
+    animation-delay: 240ms;
+  }
+
+  @keyframes placeholderPulse {
+    0%, 80%, 100% {
+      opacity: 0.35;
+      transform: translateY(0) scale(0.88);
+    }
+    40% {
+      opacity: 0.95;
+      transform: translateY(-2px) scale(1);
+    }
+  }
+
+  /* Scrollbar class utility */
+  .kn-scrollbar::-webkit-scrollbar {
+    width: 5px;
+    height: 5px;
+  }
+  .kn-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .kn-scrollbar::-webkit-scrollbar-thumb {
+    background: var(--bg-card-hover);
+    border-radius: 3px;
+  }
+  .kn-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: var(--accent-ochre);
+  }
+
+  /* Refined Thinking Details Accordion */
 
   /* Refined Thinking Details Accordion */
   .block-thinking {
