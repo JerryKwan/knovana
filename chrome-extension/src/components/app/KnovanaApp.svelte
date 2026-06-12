@@ -823,7 +823,7 @@
     if (!userMsg || userMsg.role !== 'user') return;
 
     // We only support regenerating the last user message
-    if (index !== messages.length - 2) {
+    if (index !== messages.length - 2 && index !== messages.length - 1) {
       console.warn('Only regenerating the last user message is supported.');
       return;
     }

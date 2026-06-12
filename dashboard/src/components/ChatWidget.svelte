@@ -257,6 +257,7 @@
   }
 
   // Send a chat message with full SSE handling
+  // Send a chat message with full SSE handling
   async function sendChatMessage() {
     if (!chatInput.trim() || generating || isBlocked) return;
     
@@ -277,7 +278,18 @@
     statusText = "正在唤醒智能助手...";
     statusIndicator = "loading";
     
-    let assistantMsgId = "";
+    let assistantMsgId = `msg_assistant_${Date.now()}`;
+    // Immediately append assistant placeholder message
+    messages = [...messages, {
+      id: assistantMsgId,
+      role: "assistant",
+      content: "",
+      created_at: new Date().toISOString(),
+      thinking: "",
+      blocks: []
+    }];
+    scrollToBottom();
+    
     let contentBlocks: any[] = [];
     
     function updateAssistantBlocks() {
@@ -318,15 +330,13 @@
       
       await readSse(res, (chunk) => {
         if (chunk.type === "message_start") {
+          const oldId = assistantMsgId;
           assistantMsgId = chunk.message?.id;
-          messages = [...messages, {
-            id: assistantMsgId,
-            role: "assistant",
-            content: "",
-            created_at: new Date().toISOString(),
-            thinking: "",
-            blocks: []
-          }];
+          const idx = messages.findIndex(m => m.id === oldId);
+          if (idx !== -1) {
+            messages[idx].id = assistantMsgId;
+            messages = [...messages];
+          }
           statusText = "思考中...";
           statusIndicator = "thinking";
         } else if (chunk.type === "session_created") {
@@ -463,11 +473,21 @@
         } else if (chunk.type === "error") {
           statusText = `Error: ${chunk.error?.message || "流式输出故障"}`;
           statusIndicator = "thinking";
+          const idx = messages.findIndex(m => m.id === assistantMsgId);
+          if (idx !== -1) {
+            messages[idx].error = chunk.error?.message || "流式输出故障";
+            messages = [...messages];
+          }
         }
       });
     } catch (err: any) {
       console.error("Streaming error", err);
       statusText = `连接助手失败: ${err.message || "未知网络错误"}`;
+      const idx = messages.findIndex(m => m.id === assistantMsgId);
+      if (idx !== -1) {
+        messages[idx].error = err.message || "未知网络错误";
+        messages = [...messages];
+      }
     } finally {
       generating = false;
       await loadSessions();
@@ -487,7 +507,18 @@
       messages = messages.slice(0, -1);
     }
     
-    let assistantMsgId = "";
+    let assistantMsgId = `msg_assistant_${Date.now()}`;
+    // Immediately append assistant placeholder message
+    messages = [...messages, {
+      id: assistantMsgId,
+      role: "assistant",
+      content: "",
+      created_at: new Date().toISOString(),
+      thinking: "",
+      blocks: []
+    }];
+    scrollToBottom();
+    
     let contentBlocks: any[] = [];
     
     function updateAssistantBlocks() {
@@ -523,15 +554,13 @@
       
       await readSse(res, (chunk) => {
         if (chunk.type === "message_start") {
+          const oldId = assistantMsgId;
           assistantMsgId = chunk.message?.id;
-          messages = [...messages, {
-            id: assistantMsgId,
-            role: "assistant",
-            content: "",
-            created_at: new Date().toISOString(),
-            thinking: "",
-            blocks: []
-          }];
+          const idx = messages.findIndex(m => m.id === oldId);
+          if (idx !== -1) {
+            messages[idx].id = assistantMsgId;
+            messages = [...messages];
+          }
           statusText = "思考中...";
           statusIndicator = "thinking";
         } else if (chunk.type === "status") {
@@ -663,11 +692,21 @@
         } else if (chunk.type === "error") {
           statusText = `Error: ${chunk.error?.message || "流式输出故障"}`;
           statusIndicator = "thinking";
+          const idx = messages.findIndex(m => m.id === assistantMsgId);
+          if (idx !== -1) {
+            messages[idx].error = chunk.error?.message || "流式输出故障";
+            messages = [...messages];
+          }
         }
       });
     } catch (err: any) {
       console.error("Regeneration error", err);
       statusText = `重新生成回答失败: ${err.message || "未知网络错误"}`;
+      const idx = messages.findIndex(m => m.id === assistantMsgId);
+      if (idx !== -1) {
+        messages[idx].error = err.message || "未知网络错误";
+        messages = [...messages];
+      }
     } finally {
       generating = false;
     }
@@ -1162,7 +1201,7 @@
                                 <span></span>
                               </div>
                             {:else}
-                              {#each (msg.blocks || [{ type: 'text', text: msg.content || "" }]) as block, bIdx (bIdx)}
+                              {#each (msg.blocks && msg.blocks.length > 0 ? msg.blocks : [{ type: 'text', text: msg.content || "" }]) as block, bIdx (bIdx)}
                                 {#if block.type === 'text'}
                                   {#if block.text}
                                     <div class="markdown-rich-content">
@@ -1251,16 +1290,23 @@
                             {/if}
                           </div>
                           
-                          <!-- Status Rail (Shown under assistant bubble during streaming even when content has started generating) -->
-                          {#if msg.role === 'assistant' && generating && messages[messages.length-1].id === msg.id}
-                            <div class="status-tail streaming">
-                              {#if statusIndicator === 'tool'}
-                                <span class="tool-icon-spinning">⚙️</span>
-                              {:else}
-                                <span class="pulse-dot"></span>
-                              {/if}
-                              <span>{statusText || "正在回复中..."}</span>
+                          <!-- Status Tail for Error / Streaming status -->
+                          {#if msg.error}
+                            <div class="status-tail error">
+                              <span class="error-icon">⚠️</span>
+                              <span class="error-msg">{msg.error}</span>
                             </div>
+                          {:else}
+                            {#if msg.role === 'assistant' && generating && messages[messages.length-1].id === msg.id}
+                              <div class="status-tail streaming">
+                                {#if statusIndicator === 'tool'}
+                                  <span class="tool-icon-spinning">⚙️</span>
+                                {:else}
+                                  <span class="pulse-dot"></span>
+                                {/if}
+                                <span>{statusText || "正在回复中..."}</span>
+                              </div>
+                            {/if}
                           {/if}
                           
                           <!-- Action Bar for Copy / Export -->
@@ -2330,14 +2376,28 @@
   }
 
   /* Status message tail/rail style under assistant bubble */
-  .status-tail.streaming {
+  .status-tail {
     display: flex;
     align-items: center;
     gap: 6px;
-    color: var(--text-muted);
-    font-size: 11px;
     margin-top: 6px;
+    font-size: 11px;
+    font-weight: 500;
+  }
+
+  .status-tail.streaming {
+    color: var(--text-muted);
     padding-left: 4px;
+  }
+
+  .status-tail.error {
+    color: #ef4444;
+    background: rgba(239, 68, 68, 0.08);
+    border: 1px solid rgba(239, 68, 68, 0.15);
+    border-radius: 6px;
+    padding: 6px 10px;
+    word-break: break-all;
+    width: 100%;
   }
 
   .pulse-dot {
