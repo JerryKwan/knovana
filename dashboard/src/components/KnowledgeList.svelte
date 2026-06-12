@@ -52,14 +52,41 @@
     }
   });
 
-  // Derived statistics computed locally
-  const stats = $derived(() => {
-    const total = entries.length;
-    const inboxCount = entries.filter((e) => e.id.startsWith("inbox/")).length;
-    const topicsCount = entries.filter((e) => e.id.startsWith("topics/")).length;
-    const dailyCount = entries.filter((e) => e.id.startsWith("daily/")).length;
-    return { total, inboxCount, topicsCount, dailyCount };
+  // Global stats state
+  let globalStats = $state<{
+    total: number;
+    inboxCount: number;
+    topicsCount: number;
+    dailyCount: number;
+  }>({
+    total: 0,
+    inboxCount: 0,
+    topicsCount: 0,
+    dailyCount: 0,
   });
+
+  const stats = $derived(() => globalStats);
+
+  async function loadStats() {
+    if (isBlocked) return;
+    const res = await request<{
+      total_entries: number;
+      categories: {
+        inbox: number;
+        topics: number;
+        daily: number;
+      };
+    }>("/api/v1/knowledge/stats");
+
+    if (!res.error && res.data) {
+      globalStats = {
+        total: res.data.total_entries || 0,
+        inboxCount: res.data.categories?.inbox || 0,
+        topicsCount: res.data.categories?.topics || 0,
+        dailyCount: res.data.categories?.daily || 0,
+      };
+    }
+  }
 
   // Load knowledge list from server
   async function loadList() {
@@ -216,6 +243,7 @@
     if (!isBlocked) {
       loadList();
       loadTags();
+      loadStats();
     }
     window.addEventListener("click", handleGlobalClick);
   });
