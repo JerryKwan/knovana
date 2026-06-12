@@ -162,6 +162,7 @@ export function createApp() {
   });
 
   // 8. Serve Dashboard Static Files
+  app.get("/", (c) => c.redirect("/dashboard/"));
   app.use("/dashboard/*", serveStatic({ root: "./public" }));
   app.get("/dashboard", (c) => c.redirect("/dashboard/"));
   app.get("/favicon.svg", (c) => c.redirect("/dashboard/favicon.svg"));
@@ -169,8 +170,13 @@ export function createApp() {
   // Serve index.html as a fallback for HTML5 history client-side routes under /dashboard
   app.get("/dashboard/*", async (c, next) => {
     const path = c.req.path;
-    // Skip static assets/files that contain extensions
-    if (/\.[a-z0-9]+$/i.test(path)) {
+    // Skip static assets under assets directory (to return 404 for missing assets instead of HTML fallback)
+    if (path.startsWith("/dashboard/assets/")) {
+      return next();
+    }
+    // Also skip standard assets at the root of dashboard (like .js, .css, maps, or images)
+    // but do NOT skip for markdown (.md) documents or other paths inside knowledge navigation
+    if (/\.(js|css|png|jpg|jpeg|gif|svg|ico|woff2?|ttf|eot|map|json)$/i.test(path) && !path.includes("/knowledge/")) {
       return next();
     }
     try {
