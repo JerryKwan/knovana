@@ -16,6 +16,8 @@ import { adminRoutes } from "./routes/admin";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { config } from "../config";
 import type { AppEnv } from "./env";
+import { readFileSync, existsSync } from "fs";
+import { join } from "path";
 
 /**
  * Creates and configures the Hono application instance.
@@ -163,6 +165,25 @@ export function createApp() {
   app.use("/dashboard/*", serveStatic({ root: "./public" }));
   app.get("/dashboard", (c) => c.redirect("/dashboard/"));
   app.get("/favicon.svg", (c) => c.redirect("/dashboard/favicon.svg"));
+
+  // Serve index.html as a fallback for HTML5 history client-side routes under /dashboard
+  app.get("/dashboard/*", async (c, next) => {
+    const path = c.req.path;
+    // Skip static assets/files that contain extensions
+    if (/\.[a-z0-9]+$/i.test(path)) {
+      return next();
+    }
+    try {
+      const indexPath = join(process.cwd(), "public/dashboard/index.html");
+      if (existsSync(indexPath)) {
+        const html = readFileSync(indexPath, "utf-8");
+        return c.html(html);
+      }
+    } catch (err) {
+      console.error("Failed to serve dashboard SPA fallback:", err);
+    }
+    return next();
+  });
 
   return app;
 }

@@ -7,6 +7,7 @@
   import Keys from "./components/Keys.svelte";
   import Users from "./components/Users.svelte";
   import ChatWidget from "./components/ChatWidget.svelte";
+  import { router } from "./lib/router.svelte";
 
   let loadingProfile = $state(true);
   let authenticated = $state(false);
@@ -14,8 +15,22 @@
   let status = $state("inactive");
   let isAdmin = $state(false);
   
-  let activeTab = $state("knowledge");
+  let activeTab = $derived(
+    router.currentPath.startsWith("/dashboard/keys")
+      ? "keys"
+      : router.currentPath.startsWith("/dashboard/users")
+        ? "users"
+        : "knowledge"
+  );
   let isSidebarCollapsed = $state(false);
+
+  // Normalize path if visiting root of dashboard
+  $effect(() => {
+    const path = router.currentPath;
+    if (path === "/dashboard" || path === "/dashboard/") {
+      router.navigate("/dashboard/knowledge");
+    }
+  });
 
   // Load profile from the backend
   async function loadProfile() {
@@ -53,11 +68,11 @@
     username = "";
     status = "inactive";
     isAdmin = false;
-    activeTab = "knowledge";
+    router.navigate("/dashboard/knowledge");
   }
 
   function handleTabChange(tab: string) {
-    activeTab = tab;
+    router.navigate(`/dashboard/${tab}`);
   }
 
   onMount(() => {

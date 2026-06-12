@@ -36,7 +36,7 @@ export interface ApiResponse<T> {
 
 export const request = async <T>(
   path: string,
-  options: RequestInit = {}
+  options: RequestInit = {},
 ): Promise<ApiResponse<T>> => {
   const url = getApiUrl(path);
   const token = getToken();
@@ -81,7 +81,9 @@ export const request = async <T>(
       data: null,
       error: {
         code: "NETWORK_ERROR",
-        message: err.message || "Network request failed. Is the backend server running?",
+        message:
+          err.message ||
+          "Network request failed. Is the backend server running?",
       },
       status: 500,
     };
@@ -96,7 +98,7 @@ export interface ParsedSseData {
 export async function readSseStream(
   response: Response,
   onData: (data: ParsedSseData) => void | Promise<void>,
-  signal?: AbortSignal
+  signal?: AbortSignal,
 ): Promise<void> {
   if (!response.ok) {
     const body = await response.text().catch(() => "");
@@ -161,7 +163,7 @@ export async function requestStream(
   path: string,
   body: unknown,
   onData: (data: ParsedSseData) => void | Promise<void>,
-  signal?: AbortSignal
+  signal?: AbortSignal,
 ): Promise<void> {
   const url = getApiUrl(path);
   const token = getToken();
@@ -181,4 +183,3 @@ export async function requestStream(
 
   await readSseStream(response, onData, signal);
 }
-

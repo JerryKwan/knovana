@@ -48,9 +48,7 @@ export class ApiKeyService {
   /**
    * Lists all active API Keys for the user, including the stored full key value.
    */
-  async listKeys(
-    userId: string,
-  ): Promise<
+  async listKeys(userId: string): Promise<
     Array<
       Pick<ApiKey, "id" | "name" | "created_at" | "last_used_at"> & {
         key: string | null;

@@ -19,13 +19,54 @@
     onTabChange: (tab: string) => void;
     onLogout: () => void;
   }>();
+
+  // Extract first letter of username for seal monogram avatar
+  const userInitials = $derived(username ? username.charAt(0).toUpperCase() : "?");
 </script>
 
 <div class="sidebar {isCollapsed ? 'collapsed' : ''}">
   <div class="top-sec">
     <div class="brand">
       <div class="brand-left">
-        <span class="logo">📚</span>
+        <div class="logo-container" title="Knovana">
+          <svg class="k-logo" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <linearGradient id="stemGrad" x1="34" y1="25" x2="58" y2="103" gradientUnits="userSpaceOnUse">
+                <stop offset="0" stop-color="#1E40AF" />
+                <stop offset="1" stop-color="#1D3082" />
+              </linearGradient>
+              <linearGradient id="spineBevel" x1="34" y1="64" x2="43" y2="64" gradientUnits="userSpaceOnUse">
+                <stop offset="0" stop-color="#0F1F5C" stop-opacity="0.30" />
+                <stop offset="0.42" stop-color="#142C82" stop-opacity="0.14" />
+                <stop offset="1" stop-color="#142C82" stop-opacity="0" />
+              </linearGradient>
+              <linearGradient id="spineInnerLight" x1="54" y1="64" x2="58" y2="64" gradientUnits="userSpaceOnUse">
+                <stop offset="0" stop-color="#FFFFFF" stop-opacity="0" />
+                <stop offset="1" stop-color="#FFFFFF" stop-opacity="0.13" />
+              </linearGradient>
+              <linearGradient id="faceTop" x1="58" y1="64" x2="102" y2="19" gradientUnits="userSpaceOnUse">
+                <stop offset="0" stop-color="#1D4FD7" />
+                <stop offset="0.6" stop-color="#2D6FE8" />
+                <stop offset="1" stop-color="#5B9CF5" />
+              </linearGradient>
+              <linearGradient id="faceBot" x1="58" y1="65" x2="102" y2="109" gradientUnits="userSpaceOnUse">
+                <stop offset="0" stop-color="#0C8B7F" />
+                <stop offset="0.55" stop-color="#0E9B89" />
+                <stop offset="1" stop-color="#0FB87E" />
+              </linearGradient>
+            </defs>
+            <g>
+              <rect x="34" y="26" width="24" height="76" rx="1.5" fill="url(#stemGrad)" />
+              <rect x="34.5" y="27" width="8.5" height="74" rx="1.1" fill="url(#spineBevel)" />
+              <rect x="53.5" y="27" width="4" height="74" rx="1.1" fill="url(#spineInnerLight)" />
+              <polygon points="58,64 76,28 90,28 108,42 82,64" fill="url(#faceTop)" />
+              <polygon points="60,60 76,30 88,30 76,48" fill="white" opacity="0.10" />
+              <polygon points="58,65 82,65 108,86 90,100 76,100" fill="url(#faceBot)" />
+              <polygon points="60,67 76,67 84,76 68,88" fill="white" opacity="0.08" />
+              <line x1="58" y1="64.5" x2="82" y2="64.5" stroke="#0F2E5C" stroke-width="1" opacity="0.20" />
+            </g>
+          </svg>
+        </div>
         {#if !isCollapsed}
           <h2>Knovana</h2>
         {/if}
@@ -85,14 +126,16 @@
   <div class="bottom-sec">
     {#if !isCollapsed}
       <div class="profile-card">
-        <div class="profile-avatar">👤</div>
+        <div class="profile-avatar-seal">
+          {userInitials}
+        </div>
         <div class="profile-info">
           <div class="profile-name" title={username}>{username}</div>
           <div class="badges-row">
             {#if isAdmin}
               <span class="profile-badge admin-badge">管理员</span>
             {:else}
-              <span class="profile-badge user-badge">普通用户</span>
+              <span class="profile-badge user-badge">用户</span>
             {/if}
             
             {#if status === 'active'}
@@ -105,15 +148,15 @@
       </div>
     {:else}
       <div 
-        class="profile-avatar-collapsed" 
+        class="profile-avatar-seal-collapsed" 
         title="{username} ({isAdmin ? '管理员' : '普通用户'} - {status === 'active' ? '已激活' : '待激活'})"
       >
-        👤
+        {userInitials}
       </div>
     {/if}
 
     <button class="logout-btn" onclick={onLogout} title={isCollapsed ? "安全退出" : ""}>
-      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-log-out"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
+      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-log-out"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
       {#if !isCollapsed}
         安全退出
       {/if}
@@ -128,7 +171,7 @@
     display: flex;
     flex-direction: column;
     justify-content: space-between;
-    padding: 24px;
+    padding: 24px 20px;
     height: 100%;
     transition: padding 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   }
@@ -162,45 +205,64 @@
   .brand-left {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
   }
 
-  .brand .logo {
-    font-size: 24px;
+  .logo-container {
+    display: inline-flex;
+    width: 28px;
+    height: 28px;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+    filter: drop-shadow(0 4px 8px rgba(29, 48, 130, 0.1));
+  }
+
+  .logo-container:hover {
+    transform: rotate(-8deg) scale(1.12);
+  }
+
+  .k-logo {
+    display: block;
+    width: 100%;
+    height: 100%;
   }
 
   .brand h2 {
     font-family: var(--font-serif);
-    font-size: 20px;
+    font-size: 19px;
     font-weight: 700;
+    color: var(--text-ink);
+    letter-spacing: -0.01em;
   }
 
   .collapse-toggle-btn {
     background: transparent;
     border: none;
     border-radius: 50%;
-    width: 28px;
-    height: 28px;
+    width: 26px;
+    height: 26px;
     padding: 0;
     color: var(--text-muted);
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all 0.2s ease;
     outline: none;
+    border: 1px solid transparent;
   }
 
   .collapse-toggle-btn:hover {
     background: var(--bg-card-hover);
     color: var(--text-ink);
-    transform: scale(1.08);
+    border-color: var(--border-fine);
   }
 
   .nav-links {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
   }
 
   .nav-btn {
@@ -208,10 +270,10 @@
     align-items: center;
     gap: 12px;
     width: 100%;
-    padding: 10px 14px 10px 18px;
+    padding: 10px 14px 10px 16px;
     background: transparent;
     border: none;
-    border-radius: 6px;
+    border-radius: 8px;
     color: var(--text-muted);
     font-family: var(--font-sans);
     font-size: 14px;
@@ -219,14 +281,25 @@
     text-align: left;
     cursor: pointer;
     position: relative;
-    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all 0.25s cubic-bezier(0.25, 0.8, 0.25, 1);
     outline: none;
+  }
+
+  .nav-btn svg {
+    color: var(--text-muted);
+    transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), color 0.2s ease;
+    flex-shrink: 0;
   }
 
   .nav-btn:hover {
     background: var(--bg-card-hover);
     color: var(--text-ink);
-    padding-left: 22px;
+    padding-left: 20px;
+  }
+
+  .nav-btn:hover svg {
+    color: var(--text-ink);
+    transform: scale(1.08);
   }
 
   .sidebar.collapsed .nav-btn {
@@ -236,14 +309,18 @@
 
   .sidebar.collapsed .nav-btn:hover {
     padding-left: 0;
-    transform: scale(1.05);
+    transform: scale(1.06);
   }
 
   .nav-btn.active {
     background: var(--bg-paper);
     color: var(--accent-ochre);
-    box-shadow: var(--shadow-paper);
+    box-shadow: 0 4px 12px rgba(35, 33, 28, 0.04), 0 2px 4px rgba(35, 33, 28, 0.02);
     font-weight: 600;
+  }
+
+  .nav-btn.active svg {
+    color: var(--accent-ochre);
   }
 
   /* Active selection bar indicator */
@@ -251,56 +328,68 @@
     content: '';
     position: absolute;
     left: 6px;
-    top: 25%;
+    top: 32%;
     width: 3px;
-    height: 50%;
+    height: 36%;
     background-color: var(--accent-ochre);
     border-radius: 2px;
   }
 
   .sidebar.collapsed .nav-btn.active::before {
-    left: 3px;
+    left: 4px;
   }
 
   .bottom-sec {
     display: flex;
     flex-direction: column;
-    gap: 18px;
+    gap: 16px;
     border-top: 1px solid var(--border-fine);
-    padding-top: 18px;
+    padding-top: 20px;
   }
 
   .profile-card {
     display: flex;
     align-items: center;
     gap: 12px;
-    padding: 4px;
+    padding: 2px;
   }
 
-  .profile-avatar {
-    font-size: 20px;
-    background: var(--bg-card-hover);
-    width: 38px;
-    height: 38px;
+  /* Monogram Seal Avatar styles */
+  .profile-avatar-seal {
+    width: 40px;
+    height: 40px;
     border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border: 1px solid var(--border-fine);
-  }
-
-  .profile-avatar-collapsed {
+    background: var(--bg-paper);
+    border: 1.5px solid var(--accent-ochre);
+    box-shadow: inset 0 0 0 2px var(--bg-paper), 0 2px 5px rgba(178, 90, 56, 0.15);
+    color: var(--accent-ochre);
+    font-family: var(--font-serif);
     font-size: 18px;
-    background: var(--bg-card-hover);
-    width: 38px;
-    height: 38px;
-    border-radius: 50%;
+    font-weight: 700;
     display: flex;
     align-items: center;
     justify-content: center;
-    border: 1px solid var(--border-fine);
+    user-select: none;
+    flex: 0 0 auto;
+  }
+
+  .profile-avatar-seal-collapsed {
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    background: var(--bg-paper);
+    border: 1.5px solid var(--accent-ochre);
+    box-shadow: inset 0 0 0 2px var(--bg-paper), 0 2px 4px rgba(178, 90, 56, 0.15);
+    color: var(--accent-ochre);
+    font-family: var(--font-serif);
+    font-size: 16px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     margin: 0 auto;
     cursor: default;
+    user-select: none;
   }
 
   .profile-info {
@@ -323,47 +412,50 @@
   .badges-row {
     display: flex;
     flex-wrap: wrap;
-    gap: 4px;
+    gap: 6px;
+    align-items: center;
   }
 
   .profile-badge {
     font-size: 10px;
     padding: 1px 5px;
-    border-radius: 3px;
+    border-radius: 4px;
     font-weight: 600;
+    font-family: var(--font-sans);
     line-height: 1.2;
   }
 
   .admin-badge {
-    background: #e6fffa;
-    color: #047481;
-    border: 1px solid #b2f5ea;
+    background: rgba(74, 107, 93, 0.1); /* Soft Sage background */
+    color: var(--accent-sage);
+    border: 1px solid rgba(74, 107, 93, 0.2);
   }
 
   .user-badge {
-    background: #edf2f7;
-    color: #4a5568;
-    border: 1px solid #e2e8f0;
+    background: var(--bg-card-hover);
+    color: var(--text-muted);
+    border: 1px solid var(--border-fine);
   }
 
   .status-badge {
     font-size: 10px;
     padding: 1px 5px;
-    border-radius: 3px;
+    border-radius: 4px;
     font-weight: 600;
+    font-family: var(--font-sans);
     line-height: 1.2;
   }
 
   .active-badge {
-    background: #f0fdf4;
+    background: rgba(22, 101, 52, 0.08); /* Soft Green */
     color: #166534;
-    border: 1px solid #bbf7d0;
+    border: 1px solid rgba(22, 101, 52, 0.15);
   }
 
   .inactive-badge {
-    background: #fff7ed;
-    color: #9a3412;
-    border: 1px solid #ffedd5;
+    background: rgba(185, 28, 28, 0.08); /* Soft Red */
+    color: #b91c1c;
+    border: 1px solid rgba(185, 28, 28, 0.15);
   }
 
   .logout-btn {
