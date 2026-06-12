@@ -470,12 +470,13 @@
           updateAssistantBlocks();
         } else if (chunk.type === "message_end") {
           statusText = "";
-        } else if (chunk.type === "error") {
-          statusText = `Error: ${chunk.error?.message || "流式输出故障"}`;
+        } else if (chunk.error || chunk.type === "error") {
+          const errMsg = chunk.error?.message || chunk.message || "流式输出故障";
+          statusText = `Error: ${errMsg}`;
           statusIndicator = "thinking";
           const idx = messages.findIndex(m => m.id === assistantMsgId);
           if (idx !== -1) {
-            messages[idx].error = chunk.error?.message || "流式输出故障";
+            messages[idx].error = errMsg;
             messages = [...messages];
           }
         }
@@ -689,12 +690,13 @@
           updateAssistantBlocks();
         } else if (chunk.type === "message_end") {
           statusText = "";
-        } else if (chunk.type === "error") {
-          statusText = `Error: ${chunk.error?.message || "流式输出故障"}`;
+        } else if (chunk.error || chunk.type === "error") {
+          const errMsg = chunk.error?.message || chunk.message || "流式输出故障";
+          statusText = `Error: ${errMsg}`;
           statusIndicator = "thinking";
           const idx = messages.findIndex(m => m.id === assistantMsgId);
           if (idx !== -1) {
-            messages[idx].error = chunk.error?.message || "流式输出故障";
+            messages[idx].error = errMsg;
             messages = [...messages];
           }
         }
@@ -1885,7 +1887,7 @@
 
   .tool-call-header svg {
     flex: 0 0 auto;
-    color: var(--accent-ochre);
+    color: #a08470;
     width: 13px;
     height: 13px;
   }
@@ -1895,7 +1897,7 @@
     background: var(--bg-card);
     padding: 1px 5px;
     border-radius: 4px;
-    color: var(--accent-ochre);
+    color: #a08470;
   }
 
   .tool-call-input {
@@ -2127,7 +2129,7 @@
   .thinking-brain-svg {
     width: 13px;
     height: 13px;
-    color: var(--accent-ochre);
+    color: #a08470;
   }
 
   .thinking-hint {
@@ -2219,6 +2221,33 @@
     color: var(--text-muted);
     margin: 6px 0;
     font-style: italic;
+  }
+
+  .markdown-rich-content :global(table) {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 10px 0;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+
+  .markdown-rich-content :global(th) {
+    background: var(--bg-card);
+    color: var(--text-ink);
+    font-weight: 600;
+    border: 1px solid var(--border-fine);
+    padding: 6px 10px;
+    text-align: left;
+  }
+
+  .markdown-rich-content :global(td) {
+    border: 1px solid var(--border-fine);
+    padding: 6px 10px;
+    color: var(--text-ink);
+  }
+
+  .markdown-rich-content :global(tr:nth-child(even)) {
+    background: rgba(28, 28, 26, 0.02);
   }
 
   /* Streamlined Composer Card Layout (Extension-style) */
