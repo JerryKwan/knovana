@@ -403,11 +403,14 @@
               <h3 class="card-title">{entry.title}</h3>
               
               <div class="card-footer">
-                <div class="card-tags">
+                <div class="card-tags" title={entry.tags && entry.tags.length > 0 ? entry.tags.map(t => '#' + t).join(' ') : '无标签'}>
                   {#if entry.tags && entry.tags.length > 0}
                     {#each entry.tags.slice(0, 3) as tag}
                       <span class="book-tag">#{tag}</span>
                     {/each}
+                    {#if entry.tags.length > 3}
+                      <span class="more-tags-badge">+{entry.tags.length - 3}</span>
+                    {/if}
                   {:else}
                     <span class="no-tags-placeholder">无标签</span>
                   {/if}
@@ -457,10 +460,13 @@
                 </div>
                 <div class="col-tags">
                   {#if entry.tags && entry.tags.length > 0}
-                    <div class="row-tags-list">
+                    <div class="row-tags-list" title={entry.tags.map(t => '#' + t).join(' ')}>
                       {#each entry.tags.slice(0, 4) as tag}
                         <span class="book-tag">#{tag}</span>
                       {/each}
+                      {#if entry.tags.length > 4}
+                        <span class="more-tags-badge">+{entry.tags.length - 4}</span>
+                      {/if}
                     </div>
                   {:else}
                     <span class="text-muted" style="font-size: 11px; font-style: italic;">无标签</span>
@@ -665,25 +671,26 @@
   .search-input-wrapper {
     position: relative;
     min-width: 260px;
-    flex: 1.2;
-    max-width: 380px;
+    flex: 2;
   }
 
   .search-input-wrapper input {
     padding-left: 36px;
     height: 36px;
     border-radius: 6px;
-    background: var(--bg-paper);
-    border: 1px solid var(--border-fine);
+    background: rgba(35, 33, 28, 0.03);
+    border: 1px solid rgba(178, 90, 56, 0.1);
     font-size: 13px;
     outline: none;
-    transition: all 0.2s ease;
+    width: 100%;
+    color: var(--text-ink);
+    transition: all 0.22s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
   .search-input-wrapper input:focus {
-    border-color: var(--border-focus);
-    box-shadow: 0 0 0 2px rgba(178, 90, 56, 0.08);
-    background: #fff;
+    border-color: var(--accent-ochre);
+    box-shadow: 0 1px 4px rgba(178, 90, 56, 0.05), 0 0 0 2px rgba(178, 90, 56, 0.1);
+    background: #ffffff;
   }
 
   .search-icon-svg {
@@ -1023,6 +1030,25 @@
     border: 1.5px dashed var(--border-fine); /* Scholar draft note style! */
     font-weight: 500;
     font-family: var(--font-sans);
+  }
+
+  .more-tags-badge {
+    font-size: 10.5px;
+    color: var(--text-muted);
+    background: var(--bg-paper);
+    padding: 1px 5px;
+    border-radius: 4px;
+    border: 1.5px dashed var(--border-fine);
+    cursor: help;
+    font-weight: 500;
+    font-family: var(--font-sans);
+    transition: all 0.15s ease;
+  }
+
+  .more-tags-badge:hover {
+    color: var(--accent-ochre);
+    border-color: var(--accent-ochre);
+    background: var(--bg-card-hover);
   }
 
   .card-status-icons {
