@@ -1,7 +1,8 @@
 <script lang="ts">
+  import { onMount, tick } from "svelte";
   import { request, setToken } from "../lib/api";
+  import BrandMark from "./BrandMark.svelte";
 
-  // Svelte 5 runes: props
   let { onSuccess = () => {} } = $props<{ onSuccess: () => void }>();
 
   let isRegister = $state(false);
@@ -10,6 +11,17 @@
   let confirmPassword = $state("");
   let loading = $state(false);
   let errorMsg = $state("");
+
+  let usernameInput = $state<HTMLInputElement | undefined>();
+
+  async function focusUsername() {
+    await tick();
+    usernameInput?.focus();
+  }
+
+  onMount(() => {
+    void focusUsername();
+  });
 
   async function handleSubmit(e: SubmitEvent) {
     e.preventDefault();
@@ -27,7 +39,7 @@
 
     loading = true;
     const path = isRegister ? "/api/v1/auth/register" : "/api/v1/auth/login";
-    
+
     try {
       const res = await request<{ token: string; user_id: string }>(path, {
         method: "POST",
@@ -47,32 +59,37 @@
     }
   }
 
-  function toggleMode() {
+  async function toggleMode() {
     isRegister = !isRegister;
     errorMsg = "";
     password = "";
     confirmPassword = "";
+    await focusUsername();
   }
 </script>
 
-<div class="login-wrapper">
-  <div class="paper-card login-card">
+<div class="auth-shell">
+  <div class="auth-card">
     <div class="brand-header">
-      <div class="brand-logo">📚</div>
+      <BrandMark size={56} />
       <h1>Knovana</h1>
-      <p class="subtitle">个人知识管理控制台</p>
+      <p class="subtitle">
+        {isRegister ? "创建您的控制台账号" : "个人知识管理控制台"}
+      </p>
     </div>
 
     <form onsubmit={handleSubmit}>
       <div class="form-group">
         <label for="username">用户名</label>
         <input
+          bind:this={usernameInput}
           type="text"
           id="username"
           class="paper-input"
           placeholder="输入用户名"
           bind:value={username}
           disabled={loading}
+          autocomplete="username"
           required
         />
       </div>
@@ -86,12 +103,13 @@
           placeholder="输入密码"
           bind:value={password}
           disabled={loading}
+          autocomplete={isRegister ? "new-password" : "current-password"}
           required
         />
       </div>
 
       {#if isRegister}
-        <div class="form-group">
+        <div class="form-group confirm-field">
           <label for="confirm-password">确认密码</label>
           <input
             type="password"
@@ -100,14 +118,15 @@
             placeholder="确认输入密码"
             bind:value={confirmPassword}
             disabled={loading}
+            autocomplete="new-password"
             required
           />
         </div>
       {/if}
 
       {#if errorMsg}
-        <div class="error-banner">
-          ⚠️ {errorMsg}
+        <div class="error-banner" role="alert">
+          {errorMsg}
         </div>
       {/if}
 
@@ -117,50 +136,77 @@
     </form>
 
     <div class="toggle-footer">
-      <!-- svelte-ignore a11y_invalid_attribute -->
-      <a href="javascript:void(0)" onclick={toggleMode}>
+      <button type="button" class="toggle-link" onclick={toggleMode} disabled={loading}>
         {isRegister ? "已有账号？立即登录" : "没有账号？创建新用户"}
-      </a>
+      </button>
     </div>
   </div>
 </div>
 
 <style>
-  .login-wrapper {
+  .auth-shell {
     display: flex;
     align-items: center;
     justify-content: center;
     min-height: 100vh;
-    padding: 20px;
-    background: #fbfaf7;
+    padding: 24px 20px;
+    background-color: var(--bg-paper);
+    background-image:
+      radial-gradient(ellipse 80% 60% at 15% 10%, rgba(74, 107, 93, 0.1), transparent 55%),
+      radial-gradient(ellipse 70% 55% at 85% 90%, rgba(178, 90, 56, 0.08), transparent 50%),
+      radial-gradient(ellipse 50% 40% at 50% 45%, rgba(45, 111, 232, 0.06), transparent 60%);
   }
 
-  .login-card {
+  .auth-card {
     width: 100%;
-    max-width: 400px;
-    border: 2px solid var(--border-fine);
-    box-shadow: var(--shadow-paper-lift);
+    max-width: 420px;
+    padding: 32px 28px;
+    border: 1px solid rgba(226, 224, 216, 0.85);
+    border-radius: 8px;
+    background: rgba(251, 250, 247, 0.82);
+    backdrop-filter: blur(12px);
+    box-shadow:
+      0 1px 2px rgba(35, 33, 28, 0.04),
+      0 8px 32px rgba(35, 33, 28, 0.06);
+    animation: authEnter 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  @keyframes authEnter {
+    from {
+      opacity: 0;
+      transform: translateY(16px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
 
   .brand-header {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 28px;
     text-align: center;
-    margin-bottom: 30px;
   }
 
-  .brand-logo {
-    font-size: 48px;
-    margin-bottom: 8px;
+  .brand-header h1 {
+    font-size: 1.75rem;
+    line-height: 1.2;
+    margin: 0;
   }
 
   .subtitle {
     font-size: 13px;
     color: var(--text-muted);
     font-family: var(--font-sans);
-    margin-top: 4px;
+    margin: 0;
+    transition: opacity 0.2s ease;
   }
 
   .form-group {
-    margin-bottom: 20px;
+    margin-bottom: 18px;
     text-align: left;
   }
 
@@ -172,26 +218,57 @@
     color: var(--text-muted);
   }
 
+  .confirm-field {
+    animation: authEnter 0.25s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
   .error-banner {
     background: #fff5f5;
-    border: 1px solid #feb2b2;
-    color: #c53030;
+    border: 1px solid #fecaca;
+    border-left: 3px solid #c53030;
+    color: #9b2c2c;
     padding: 10px 14px;
     border-radius: 4px;
     font-size: 13px;
-    margin-bottom: 20px;
+    margin-bottom: 18px;
     text-align: left;
   }
 
   .submit-btn {
     width: 100%;
-    margin-top: 10px;
+    margin-top: 6px;
     height: 42px;
   }
 
   .toggle-footer {
     text-align: center;
-    margin-top: 24px;
+    margin-top: 22px;
+  }
+
+  .toggle-link {
+    background: none;
+    border: none;
+    padding: 4px 8px;
     font-size: 13px;
+    font-family: var(--font-sans);
+    color: var(--accent-ochre);
+    cursor: pointer;
+    transition: color 0.2s ease;
+  }
+
+  .toggle-link:hover:not(:disabled) {
+    color: var(--accent-terracotta);
+    text-decoration: underline;
+  }
+
+  .toggle-link:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  @media (max-width: 480px) {
+    .auth-card {
+      padding: 28px 22px;
+    }
   }
 </style>

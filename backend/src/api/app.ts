@@ -110,6 +110,7 @@ export function createApp() {
           <meta charset="utf-8" />
           <title>Knovana API Interactive Test Console (Swagger UI)</title>
           <meta name="viewport" content="width=device-width, initial-scale=1">
+          <link rel="icon" type="image/svg+xml" href="/dashboard/favicon.svg" />
           <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
           <style>
             body { margin: 0; padding: 0; background-color: #fafafa; }
@@ -144,6 +145,7 @@ export function createApp() {
           <title>Knovana API Reference (ReDoc)</title>
           <meta charset="utf-8"/>
           <meta name="viewport" content="width=device-width, initial-scale=1">
+          <link rel="icon" type="image/svg+xml" href="/dashboard/favicon.svg" />
           <link href="https://fonts.googleapis.com/css?family=Montserrat:300,400,700|Roboto:300,400,700" rel="stylesheet">
           <style>
             body { margin: 0; padding: 0; }
@@ -160,6 +162,7 @@ export function createApp() {
   // 8. Serve Dashboard Static Files
   app.use("/dashboard/*", serveStatic({ root: "./public" }));
   app.get("/dashboard", (c) => c.redirect("/dashboard/"));
+  app.get("/favicon.svg", (c) => c.redirect("/dashboard/favicon.svg"));
 
   return app;
 }
