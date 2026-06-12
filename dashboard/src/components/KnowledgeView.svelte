@@ -61,24 +61,29 @@
       .replace(/^-+|-+$/g, "");
   }
 
-  // Parse headers from markdown content to construct Table of Contents (TOC)
+  // Parse headers from markdown content to construct Table of Contents (TOC) using marked AST lexer
   const toc = $derived(() => {
     if (!selectedEntry) return [];
     const raw = selectedEntry.content;
-    const lines = raw.split("\n");
+    const tokens = marked.lexer(raw);
     const headings: Array<{ level: number; text: string; id: string }> = [];
     let headingCount = 0;
-    
-    lines.forEach((line) => {
-      const match = line.match(/^(#{1,3})\s+(.+)$/);
-      if (match) {
-        const level = match[1].length;
-        const rawText = match[2].replace(/<[^>]*>/g, "").trim(); // Strip HTML if any
-        const cleanText = rawText.replace(/[#*`_[\]]/g, "").trim(); // Strip markdown decorators
-        const anchorId = slugify(cleanText) || `heading-${headingCount++}`;
-        headings.push({ level, text: cleanText, id: anchorId });
+
+    function traverse(tokenList: any[]) {
+      for (const token of tokenList) {
+        if (token.type === "heading") {
+          const cleanText = token.text.replace(/<[^>]*>/g, "").trim();
+          const anchorId = slugify(cleanText) || `heading-${headingCount++}`;
+          if (token.depth <= 3) {
+            headings.push({ level: token.depth, text: cleanText, id: anchorId });
+          }
+        } else if (token.tokens) {
+          traverse(token.tokens);
+        }
       }
-    });
+    }
+
+    traverse(tokens);
     return headings;
   });
 
@@ -95,19 +100,21 @@
     const rawMarkdown = selectedEntry.content;
     const noteDir = getNoteDir(selectedEntry.id);
     
+    // Create custom renderer to synchronize heading IDs with TOC
+    const renderer = new marked.Renderer();
+    let headingCount = 0;
+    
+    renderer.heading = ({ text, depth }) => {
+      const cleanText = text.replace(/<[^>]*>/g, "").trim();
+      const slug = slugify(cleanText) || `heading-${headingCount++}`;
+      return `<h${depth} id="${slug}">${text}</h${depth}>\n`;
+    };
+
     // Parse markdown to HTML
-    let html = marked.parse(rawMarkdown) as string;
+    let html = marked.parse(rawMarkdown, { renderer, async: false }) as string;
 
     // Sanitize HTML
     html = DOMPurify.sanitize(html);
-
-    // Inject heading IDs for TOC anchors
-    let headingCount = 0;
-    html = html.replace(/<h([1-3])>(.*?)<\/h\1>/gi, (match, level, text) => {
-      const cleanText = text.replace(/<[^>]*>/g, "").trim();
-      const slug = slugify(cleanText) || `heading-${headingCount++}`;
-      return `<h${level} id="${slug}">${text}</h${level}>`;
-    });
 
     // Rewrite relative assets path: src="assets/image.png" -> absolute API path
     const token = getToken();
@@ -339,7 +346,13 @@
               {#each selectedEntry.attachments as att}
                 <div class="attachment-card">
                   <div class="att-icon-badge {getFileExt(att.name).toLowerCase()}">
-                    {getFileExt(att.name)}
+                    {#if isImage(att.name)}
+                      <a href={getAttachmentUrl(att.name)} target="_blank" class="att-thumb-link" title="在新窗口预览原图">
+                        <img class="att-thumbnail" src={getAttachmentUrl(att.name)} alt={att.name} />
+                      </a>
+                    {:else}
+                      {getFileExt(att.name)}
+                    {/if}
                   </div>
                   <div class="att-card-details">
                     <span class="att-name" title={att.name}>{att.name}</span>
@@ -632,6 +645,25 @@
     color: var(--text-muted);
     font-family: var(--font-sans);
     flex-shrink: 0;
+    overflow: hidden;
+  }
+
+  .att-thumb-link {
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+
+  .att-thumbnail {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+    transition: transform 0.2s ease;
+  }
+
+  .att-thumbnail:hover {
+    transform: scale(1.08);
   }
 
   .att-icon-badge.pdf {
