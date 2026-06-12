@@ -2542,13 +2542,23 @@
   .message-actions {
     display: flex;
     align-items: center;
-    gap: 8px;
-    margin-top: 4px;
+    gap: 6px;
+    margin-top: 6px;
     padding-left: 2px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 150ms ease;
+  }
+
+  .message-row:hover .message-actions {
+    opacity: 1;
+    pointer-events: auto;
   }
 
   .message-row.user .message-actions {
     justify-content: flex-end;
+    margin-top: 4px;
+    width: 100%;
     padding-left: 0;
     padding-right: 2px;
   }
