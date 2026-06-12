@@ -144,6 +144,18 @@ export const KnowledgeUpdateSchema = z.object({
     .optional()
     .openapi({ description: "更新后的标签列表" }),
   source: z.string().optional().openapi({ description: "更新后的来源 URL" }),
+  category: z
+    .string()
+    .optional()
+    .openapi({ description: "更新后的分类目录，如 inbox, daily, 或 topics/frontend" }),
+  storage_name: z
+    .string()
+    .optional()
+    .openapi({ description: "更新后的物理存储文件名（不含扩展名或index.md）" }),
+  attachments: z
+    .array(KnowledgeAttachmentSchema)
+    .optional()
+    .openapi({ description: "更新后的附件列表" }),
 });
 
 export const TagsListResponseSchema = z.object({

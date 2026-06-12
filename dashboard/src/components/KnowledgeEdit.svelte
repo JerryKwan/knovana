@@ -1,9 +1,12 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, onDestroy } from "svelte";
   import { request, getApiUrl, getToken } from "../lib/api";
   import { router } from "../lib/router.svelte";
   import { marked } from "marked";
   import DOMPurify from "dompurify";
+  import { EditorView, basicSetup } from "codemirror";
+  import { EditorState } from "@codemirror/state";
+  import { markdown } from "@codemirror/lang-markdown";
 
   interface Attachment {
     name: string;
@@ -31,6 +34,7 @@
 
   // Edit states
   let editTitle = $state("");
+  let editStorageName = $state("");
   let editContent = $state("");
   let editTags = $state<string[]>([]);
   let editSourceUrl = $state("");
@@ -38,9 +42,33 @@
   let savingNote = $state(false);
   
   let editorView = $state<"edit" | "split" | "preview">("split");
-  let textareaRef = $state<HTMLTextAreaElement | null>(null);
+  let editorDiv = $state<HTMLDivElement | null>(null);
+  let editorViewInstance = $state<EditorView | null>(null);
+  let previewPaneRef = $state<HTMLDivElement | null>(null);
+  
   let uploadingAttachment = $state(false);
   let isDragOver = $state(false);
+  
+  // Category states
+  let currentCategory = $state("inbox");
+  let newTopicName = $state("");
+  let isAddingNewTopic = $state(false);
+  let existingCategories = $state<string[]>([]);
+  
+  // Sidebar states
+  let isSidebarCollapsed = $state(false);
+  let activeSidebarTab = $state<"properties" | "attachments">("properties");
+
+  // Helper to extract storage name from ID
+  function extractStorageName(idStr: string): string {
+    const parts = idStr.split("/");
+    const lastPart = parts.pop() || "";
+    if (lastPart === "index.md") {
+      return parts.pop() || "";
+    } else {
+      return lastPart.replace(/\.md$/, "");
+    }
+  }
 
   // Fetch detailed entry content for editing
   async function loadEntry() {
@@ -57,13 +85,47 @@
       } else if (res.data) {
         selectedEntry = res.data;
         editTitle = res.data.title;
+        editStorageName = extractStorageName(res.data.id);
         editContent = res.data.content;
         editTags = [...res.data.tags];
         editSourceUrl = res.data.source_url || "";
         editAttachments = [...(res.data.attachments || [])];
+
+        // Determine category
+        if (res.data.id.startsWith("daily/")) {
+          currentCategory = "daily";
+        } else if (res.data.id.startsWith("topics/")) {
+          const parts = res.data.id.split("/");
+          if (parts.length >= 3) {
+            currentCategory = `topics/${parts[1]}`;
+          } else {
+            currentCategory = "topics/general";
+          }
+        } else {
+          currentCategory = "inbox";
+        }
       }
     } finally {
       loadingDetail = false;
+    }
+  }
+
+  // Load existing categories to display in dropdown
+  async function loadExistingCategories() {
+    try {
+      const res = await request<{ entries: { id: string }[] }>("/api/v1/knowledge?per_page=500");
+      if (res.data && res.data.entries) {
+        const cats = new Set<string>();
+        for (const entry of res.data.entries) {
+          const parts = entry.id.split("/");
+          if (parts.length >= 2 && parts[0] === "topics") {
+            cats.add(`topics/${parts[1]}`);
+          }
+        }
+        existingCategories = Array.from(cats);
+      }
+    } catch (err) {
+      console.error("Failed to load categories:", err);
     }
   }
 
@@ -88,6 +150,8 @@
             content: editContent,
             tags: editTags,
             source: editSourceUrl,
+            category: currentCategory,
+            storage_name: editStorageName,
             attachments: editAttachments,
           }),
         }
@@ -96,7 +160,17 @@
       if (res.error) {
         alert(`保存失败: ${res.error.message}`);
       } else {
-        router.navigate(`/dashboard/knowledge/view/${encodeURIComponent(selectedEntry.id)}`);
+        const hasAtts = editAttachments.length > 0;
+        const finalStorage = editStorageName.toLowerCase().trim().replace(/[\s_]+/g, "-").replace(/[/?!:;.,\\()[\]{}'"“”('_)*=&%#@^~`<>|\u00a7\u00b6]/g, "").replace(/-+/g, "-").replace(/^-+|-+$/g, "");
+        
+        let targetId = "";
+        if (currentCategory === "daily") {
+          targetId = hasAtts ? `daily/${finalStorage}/index.md` : `daily/${finalStorage}.md`;
+        } else {
+          targetId = hasAtts ? `${currentCategory}/${finalStorage}/index.md` : `${currentCategory}/${finalStorage}.md`;
+        }
+
+        router.navigate(`/dashboard/knowledge/view/${encodeURIComponent(targetId)}`);
       }
     } finally {
       savingNote = false;
@@ -146,6 +220,8 @@
             description: "",
           },
         ];
+        // Automatically switch to attachments tab when file uploaded
+        activeSidebarTab = "attachments";
       }
     } catch (err: any) {
       alert(`上传附件失败: ${err.message}`);
@@ -162,7 +238,6 @@
     input.value = "";
   }
 
-  // Drag and drop attachment handler
   async function handleDrop(e: DragEvent) {
     e.preventDefault();
     isDragOver = false;
@@ -172,14 +247,130 @@
     }
   }
 
+  // Paper / Academic Custom Theme for CodeMirror 6
+  const paperTheme = EditorView.theme({
+    "&": {
+      height: "100%",
+      fontSize: "14.5px",
+      fontFamily: "var(--font-sans), sans-serif",
+      backgroundColor: "var(--bg-paper)",
+      color: "var(--text-ink)",
+    },
+    ".cm-content": {
+      padding: "0",
+      lineHeight: "1.7",
+      caretColor: "var(--accent-ochre)",
+    },
+    ".cm-line": {
+      padding: "0",
+    },
+    ".cm-scroller": {
+      overflow: "auto",
+      fontFamily: "var(--font-serif), Georgia, serif",
+      fontSize: "15px",
+      padding: "30px",
+    },
+    ".cm-gutters": {
+      display: "none",
+    },
+    "&.cm-focused": {
+      outline: "none"
+    },
+    ".cm-selectionBackground, ::selection": {
+      backgroundColor: "rgba(178, 90, 56, 0.12) !important",
+    }
+  }, { dark: false });
+
+  let isUpdatingFromCM = false;
+
+  let contextMenu = $state({
+    show: false,
+    x: 0,
+    y: 0,
+    line: 1
+  });
+
+  function closeContextMenu() {
+    if (contextMenu.show) {
+      contextMenu.show = false;
+    }
+  }
+
+  function handleContextMenu(event: MouseEvent) {
+    if (!editorViewInstance) return;
+    event.preventDefault();
+    event.stopPropagation();
+
+    let clickedLine = 1;
+    const pos = editorViewInstance.posAtCoords({ x: event.clientX, y: event.clientY });
+    if (pos !== null) {
+      try {
+        clickedLine = editorViewInstance.state.doc.lineAt(pos).number;
+        editorViewInstance.dispatch({
+          selection: { anchor: pos },
+          scrollIntoView: false
+        });
+      } catch (e) {
+        try {
+          const cursorPos = editorViewInstance.state.selection.main.head;
+          clickedLine = editorViewInstance.state.doc.lineAt(cursorPos).number;
+        } catch (err) {}
+      }
+    } else {
+      try {
+        const cursorPos = editorViewInstance.state.selection.main.head;
+        clickedLine = editorViewInstance.state.doc.lineAt(cursorPos).number;
+      } catch (err) {}
+    }
+
+    let x = event.clientX;
+    let y = event.clientY;
+    const menuWidth = 160;
+    const menuHeight = 38;
+    if (x + menuWidth > window.innerWidth) {
+      x = window.innerWidth - menuWidth - 10;
+    }
+    if (y + menuHeight > window.innerHeight) {
+      y = window.innerHeight - menuHeight - 10;
+    }
+
+    contextMenu = {
+      show: true,
+      x,
+      y,
+      line: clickedLine
+    };
+  }
+
+  function initEditor() {
+    if (!editorDiv) return;
+
+    const startState = EditorState.create({
+      doc: editContent,
+      extensions: [
+        basicSetup,
+        markdown(),
+        paperTheme,
+        EditorView.lineWrapping,
+        EditorView.updateListener.of((update) => {
+          if (update.docChanged) {
+            isUpdatingFromCM = true;
+            editContent = update.state.doc.toString();
+            isUpdatingFromCM = false;
+          }
+        })
+      ]
+    });
+
+    editorViewInstance = new EditorView({
+      state: startState,
+      parent: editorDiv
+    });
+  }
+
   // Insert attachment Markdown code
   function insertAttachment(att: Attachment) {
-    if (!textareaRef) return;
-    const textarea = textareaRef;
-    const start = textarea.selectionStart;
-    const end = textarea.selectionEnd;
-    const text = textarea.value;
-
+    if (!editorViewInstance) return;
     const isImg = ["png", "jpg", "jpeg", "gif", "webp", "svg"].includes(
       att.name.split(".").pop()?.toLowerCase() || ""
     );
@@ -187,20 +378,154 @@
       ? `![${att.name}](attachments/${att.name})`
       : `[${att.name}](attachments/${att.name})`;
 
-    editContent = text.substring(0, start) + refText + text.substring(end);
+    const state = editorViewInstance.state;
+    const ranges = state.selection.ranges;
+    const primaryRange = ranges[0] || { from: state.doc.length, to: state.doc.length };
 
-    setTimeout(() => {
-      textarea.focus();
-      textarea.setSelectionRange(start + refText.length, start + refText.length);
-    }, 0);
+    editorViewInstance.dispatch({
+      changes: {
+        from: primaryRange.from,
+        to: primaryRange.to,
+        insert: refText
+      },
+      selection: { anchor: primaryRange.from + refText.length },
+      scrollIntoView: true
+    });
+
+    editorViewInstance.focus();
   }
 
-  // Remove attachment link
   function removeAttachment(attName: string) {
     editAttachments = editAttachments.filter((a) => a.name !== attName);
   }
 
-  // Compile real-time markdown editor preview with temporary upload support
+  // Effect to sync content to CodeMirror from outside
+  $effect(() => {
+    if (editorViewInstance && !isUpdatingFromCM) {
+      const currentDoc = editorViewInstance.state.doc.toString();
+      if (currentDoc !== editContent) {
+        editorViewInstance.dispatch({
+          changes: { from: 0, to: currentDoc.length, insert: editContent }
+        });
+      }
+    }
+  });
+
+  function syncPreviewToLine(lineNum?: number) {
+    if (!editorViewInstance || !previewPaneRef) return;
+
+    // 1. Get the target line number
+    let targetLineNum = lineNum;
+    if (targetLineNum === undefined) {
+      try {
+        const cursorPos = editorViewInstance.state.selection.main.head;
+        targetLineNum = editorViewInstance.state.doc.lineAt(cursorPos).number;
+      } catch (e) {
+        targetLineNum = 1;
+      }
+    }
+
+    // 2. Parse headings in the Markdown text, skipping code blocks
+    const lines = editContent.split("\n");
+    const headings: { text: string; line: number }[] = [];
+    let inCodeBlock = false;
+    for (let i = 0; i < lines.length; i++) {
+      const trimmed = lines[i].trim();
+      if (trimmed.startsWith("```")) {
+        inCodeBlock = !inCodeBlock;
+        continue;
+      }
+      if (inCodeBlock) continue;
+
+      const match = lines[i].match(/^(#{1,6})\s+(.+)$/);
+      if (match) {
+        headings.push({
+          text: match[2].trim(),
+          line: i + 1, // 1-indexed line number
+        });
+      }
+    }
+
+    // 3. Find heading elements in the preview DOM
+    const headingElements = previewPaneRef.querySelectorAll<HTMLElement>(
+      "h1, h2, h3, h4, h5, h6"
+    );
+
+    let targetScrollTop = 0;
+
+    // If no headings found, fall back to pure percentage sync scroll based on line number
+    if (headings.length === 0 || headingElements.length === 0) {
+      const percentage = targetLineNum / Math.max(1, lines.length);
+      previewPaneRef.scrollTop = percentage * (previewPaneRef.scrollHeight - previewPaneRef.clientHeight);
+      return;
+    }
+
+    // 4. Find the closest heading at or above targetLineNum
+    let k = -1;
+    for (let i = 0; i < headings.length; i++) {
+      if (headings[i].line <= targetLineNum) {
+        k = i;
+      } else {
+        break;
+      }
+    }
+
+    if (k === -1) {
+      // Before the first heading
+      const firstHeadingLine = headings[0].line;
+      const firstHeadingEl = headingElements[0];
+      const ratio = targetLineNum / Math.max(1, firstHeadingLine);
+      if (firstHeadingEl) {
+        const targetY = firstHeadingEl.offsetTop - previewPaneRef.offsetTop;
+        targetScrollTop = ratio * targetY;
+      } else {
+        const percentage = targetLineNum / Math.max(1, lines.length);
+        targetScrollTop = percentage * (previewPaneRef.scrollHeight - previewPaneRef.clientHeight);
+      }
+    } else if (k === headings.length - 1) {
+      // After the last heading
+      const lastHeadingLine = headings[k].line;
+      const lastHeadingEl = headingElements[k];
+      const totalLines = lines.length;
+      
+      const ratio = (targetLineNum - lastHeadingLine) / Math.max(1, totalLines - lastHeadingLine);
+      if (lastHeadingEl) {
+        const startY = lastHeadingEl.offsetTop - previewPaneRef.offsetTop;
+        const endY = previewPaneRef.scrollHeight - previewPaneRef.clientHeight;
+        targetScrollTop = startY + ratio * (endY - startY);
+      } else {
+        const percentage = targetLineNum / Math.max(1, lines.length);
+        targetScrollTop = percentage * (previewPaneRef.scrollHeight - previewPaneRef.clientHeight);
+      }
+    } else {
+      // Between heading k and k + 1
+      const lineStart = headings[k].line;
+      const lineEnd = headings[k + 1].line;
+      const ratio = (targetLineNum - lineStart) / Math.max(1, lineEnd - lineStart);
+
+      const elStart = headingElements[k];
+      const elEnd = headingElements[k + 1];
+
+      if (elStart && elEnd) {
+        const yStart = elStart.offsetTop - previewPaneRef.offsetTop;
+        const yEnd = elEnd.offsetTop - previewPaneRef.offsetTop;
+        targetScrollTop = yStart + ratio * (yEnd - yStart);
+      } else if (elStart) {
+        targetScrollTop = elStart.offsetTop - previewPaneRef.offsetTop;
+      } else {
+        const percentage = targetLineNum / Math.max(1, lines.length);
+        targetScrollTop = percentage * (previewPaneRef.scrollHeight - previewPaneRef.clientHeight);
+      }
+    }
+
+    // Scroll smoothly
+    previewPaneRef.scrollTo({
+      top: targetScrollTop,
+      behavior: "smooth"
+    });
+  }
+
+  // Compile real-time markdown editor preview
   const compiledEditPreview = $derived(() => {
     if (!selectedEntry) return "";
     const rawMarkdown = editContent;
@@ -246,8 +571,20 @@
     return attName.split('.').pop()?.toUpperCase() || 'FILE';
   }
 
-  onMount(() => {
-    loadEntry();
+  onMount(async () => {
+    await loadEntry();
+    await loadExistingCategories();
+    initEditor();
+    window.addEventListener("click", closeContextMenu);
+    window.addEventListener("contextmenu", closeContextMenu);
+  });
+
+  onDestroy(() => {
+    if (editorViewInstance) {
+      editorViewInstance.destroy();
+    }
+    window.removeEventListener("click", closeContextMenu);
+    window.removeEventListener("contextmenu", closeContextMenu);
   });
 </script>
 
@@ -267,6 +604,15 @@
         <button class="segment-btn {editorView === 'split' ? 'active' : ''}" onclick={() => editorView = 'split'}>双栏分屏</button>
         <button class="segment-btn {editorView === 'preview' ? 'active' : ''}" onclick={() => editorView = 'preview'}>仅预览</button>
       </div>
+
+      <button 
+        class="props-toggle-btn {isSidebarCollapsed ? 'collapsed' : ''}" 
+        onclick={() => isSidebarCollapsed = !isSidebarCollapsed}
+        title={isSidebarCollapsed ? "展开属性面板" : "收起属性面板"}
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-layout-sidebar-right"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M15 3v18"/></svg>
+        {isSidebarCollapsed ? "属性面板" : "收起面板"}
+      </button>
 
       <div class="action-buttons">
         <button class="paper-button" onclick={cancelEditing}>取消</button>
@@ -292,125 +638,259 @@
       <!-- Workspace: Left Editor Pane & Right Preview Pane -->
       <div class="editor-main-workspace {editorView}">
         <!-- Editor Input Panel -->
-        {#if editorView === 'edit' || editorView === 'split'}
-          <div class="editor-pane">
-            <!-- Title & Source Inputs -->
-            <div class="editor-fields-box">
-              <div class="form-group">
-                <label for="edit-title">标题</label>
-                <input id="edit-title" type="text" class="paper-input title-input" bind:value={editTitle} placeholder="输入笔记标题..." />
-              </div>
-              <div class="form-group">
-                <label for="edit-source">来源 URL</label>
-                <input id="edit-source" type="text" class="paper-input source-input" bind:value={editSourceUrl} placeholder="例如: https://example.com/article" />
-              </div>
-            </div>
-            
-            <!-- Textarea -->
-            <textarea
-              bind:this={textareaRef}
-              class="editor-textarea"
-              bind:value={editContent}
-              placeholder="请在此输入 Markdown 正文内容..."
-            ></textarea>
-          </div>
-        {/if}
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div 
+          class="editor-pane" 
+          class:hidden={editorView === 'preview'}
+          oncontextmenu={handleContextMenu}
+        >
+          <!-- CodeMirror parent container -->
+          <div bind:this={editorDiv} class="codemirror-editor-container"></div>
+        </div>
         
         <!-- Live HTML Viewer Panel -->
-        {#if editorView === 'preview' || editorView === 'split'}
-          <div class="preview-pane markdown-body">
-            {#if editorView === 'preview'}
-              <!-- Show title in full preview mode -->
-              <h1 class="preview-title">{editTitle || '无标题'}</h1>
-            {/if}
-            {@html compiledEditPreview()}
-          </div>
-        {/if}
+        <div 
+          class="preview-pane markdown-body" 
+          class:hidden={editorView === 'edit'}
+          bind:this={previewPaneRef}
+        >
+          {@html compiledEditPreview()}
+        </div>
       </div>
 
       <!-- Collapsible properties sidebar (Metadata, tags & attachments upload) -->
-      <aside class="editor-props-sidebar">
-        <!-- Tags Manager -->
-        <section class="props-section">
-          <h4 class="props-section-title">条目标签</h4>
-          <div class="tag-input-container">
-            <div class="edit-tags-list">
-              {#each editTags as tag}
-                <span class="note-tag-pill editing">
-                  #{tag}
-                  <button class="remove-tag-btn" onclick={() => editTags = editTags.filter(t => t !== tag)} title="移除">×</button>
-                </span>
-              {/each}
-            </div>
-            <input
-              type="text"
-              class="paper-input tag-input-box"
-              placeholder="输入标签并回车添加"
-              onkeydown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  const val = (e.target as HTMLInputElement).value.trim().replace(/^#/, '');
-                  if (val && !editTags.includes(val)) {
-                    editTags = [...editTags, val];
-                  }
-                  (e.target as HTMLInputElement).value = '';
-                }
-              }}
-            />
-          </div>
-        </section>
-
-        <!-- Attachments shelf -->
-        <section class="props-section attachments-shelf">
-          <h4 class="props-section-title">关联附件 ({editAttachments.length})</h4>
-          
-          <!-- Drag & Drop Uploader -->
-          <!-- svelte-ignore a11y_no_static_element_interactions -->
-          <div 
-            class="drag-upload-zone {isDragOver ? 'dragover' : ''} {uploadingAttachment ? 'uploading' : ''}"
-            ondragover={(e) => { e.preventDefault(); isDragOver = true; }}
-            ondragleave={() => { isDragOver = false; }}
-            ondrop={handleDrop}
+      <aside class="editor-props-sidebar" class:collapsed={isSidebarCollapsed}>
+        <!-- Tabs Header -->
+        <div class="sidebar-tabs">
+          <button 
+            type="button"
+            class="sidebar-tab-btn {activeSidebarTab === 'properties' ? 'active' : ''}" 
+            onclick={() => activeSidebarTab = 'properties'}
           >
-            <input 
-              type="file" 
-              id="file-upload" 
-              class="hidden-file-input" 
-              onchange={handleUploadAttachment} 
-              disabled={uploadingAttachment}
-            />
-            <label for="file-upload" class="upload-zone-label">
-              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-upload-cloud"><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"/><path d="M12 12v9"/><path d="m15 15-3-3-3 3"/></svg>
-              <span>{uploadingAttachment ? '正在上传文件...' : '拖拽文件至此 或 点击上传'}</span>
-            </label>
-          </div>
+            📝 属性
+          </button>
+          <button 
+            type="button"
+            class="sidebar-tab-btn {activeSidebarTab === 'attachments' ? 'active' : ''}" 
+            onclick={() => activeSidebarTab = 'attachments'}
+          >
+            📎 附件 ({editAttachments.length})
+          </button>
+        </div>
 
-          <!-- Attachments list -->
-          {#if editAttachments.length === 0}
-            <p class="no-attachments-text">本条目尚无附件</p>
-          {:else}
-            <div class="edit-attachments-list">
-              {#each editAttachments as att}
-                <div class="attachment-item-card">
-                  <div class="att-type-label">{getFileExt(att.name)}</div>
-                  <div class="att-meta">
-                    <span class="att-name" title={att.name}>{att.name}</span>
-                    <span class="att-size">{formatBytes(att.size)}</span>
-                  </div>
-                  <div class="att-actions">
-                    <button class="att-btn" onclick={() => insertAttachment(att)} title="插入到Markdown光标位置">
-                      插入
-                    </button>
-                    <button class="att-btn danger" onclick={() => removeAttachment(att.name)} title="从条目中解绑附件">
-                      解绑
-                    </button>
-                  </div>
-                </div>
-              {/each}
+        <!-- Tab 1: Properties Grid -->
+        {#if activeSidebarTab === 'properties'}
+          <div class="properties-grid">
+            <!-- Title -->
+            <div class="property-row block-row">
+              <div class="property-label">
+                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15h16"/><path d="M4 6h16"/><path d="M12 2v20"/></svg>
+                文档标题
+              </div>
+              <div class="property-value">
+                <textarea 
+                  class="property-textarea" 
+                  bind:value={editTitle} 
+                  placeholder="无标题"
+                  rows="1"
+                  oninput={(e) => {
+                    const target = e.target as HTMLTextAreaElement;
+                    target.style.height = 'auto';
+                    target.style.height = target.scrollHeight + 'px';
+                  }}
+                ></textarea>
+              </div>
             </div>
-          {/if}
-        </section>
+
+            <!-- Storage Name (Filename) -->
+            <div class="property-row block-row">
+              <div class="property-label">
+                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
+                存储文件名
+              </div>
+              <div class="property-value">
+                <input 
+                  type="text" 
+                  class="property-input filename-input" 
+                  bind:value={editStorageName} 
+                  placeholder="请输入存储文件名..." 
+                />
+                <span class="property-info-tip">⚠️ 更改存储名字会物理重命名，其它双链引用将失效</span>
+              </div>
+            </div>
+
+            <!-- Category selection -->
+            <div class="property-row block-row">
+              <div class="property-label">
+                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                归档位置
+              </div>
+              <div class="property-value">
+                <select class="property-select" bind:value={currentCategory} onchange={() => {
+                  if (currentCategory === '__new_topic__') {
+                    isAddingNewTopic = true;
+                  } else {
+                    isAddingNewTopic = false;
+                  }
+                }}>
+                  <option value="inbox">📥 收集箱 (inbox)</option>
+                  <option value="daily">📝 随笔日记 (daily)</option>
+                  {#if existingCategories.length > 0}
+                    <option disabled>────── 专题类别 ──────</option>
+                    {#each existingCategories as cat}
+                      <option value={cat}>📚 {cat.replace('topics/', '')}</option>
+                    {/each}
+                  {/if}
+                  <option value="__new_topic__">➕ 新建专题...</option>
+                </select>
+                
+                {#if isAddingNewTopic}
+                  <div class="new-topic-input-wrapper">
+                    <input 
+                      type="text" 
+                      class="property-input" 
+                      placeholder="输入新专题标识 (如 ai)..." 
+                      bind:value={newTopicName}
+                      onblur={() => {
+                        const cleaned = newTopicName.trim().toLowerCase().replace(/[^a-z0-9-_]/g, "");
+                        if (cleaned) {
+                          const catVal = `topics/${cleaned}`;
+                          if (!existingCategories.includes(catVal)) {
+                            existingCategories = [...existingCategories, catVal];
+                          }
+                          currentCategory = catVal;
+                        }
+                        isAddingNewTopic = false;
+                        newTopicName = "";
+                      }}
+                      onkeydown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          (e.target as HTMLInputElement).blur();
+                        }
+                      }}
+                    />
+                  </div>
+                {/if}
+              </div>
+            </div>
+
+            <!-- Source URL -->
+            <div class="property-row block-row">
+              <div class="property-label">
+                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+                来源 URL
+              </div>
+              <div class="property-value">
+                <input 
+                  type="text" 
+                  class="property-input" 
+                  bind:value={editSourceUrl} 
+                  placeholder="无来源 URL" 
+                />
+              </div>
+            </div>
+
+            <!-- Tags -->
+            <div class="property-row block-row">
+              <div class="property-label">
+                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+                条目标签
+              </div>
+              <div class="property-value tags-value">
+                <div class="edit-tags-list">
+                  {#each editTags as tag}
+                    <span class="note-tag-pill editing">
+                      #{tag}
+                      <button class="remove-tag-btn" onclick={() => editTags = editTags.filter(t => t !== tag)} title="移除">×</button>
+                    </span>
+                  {/each}
+                </div>
+                <input
+                  type="text"
+                  class="property-input tag-input-box"
+                  placeholder="输入标签并回车添加"
+                  onkeydown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      const val = (e.target as HTMLInputElement).value.trim().replace(/^#/, '');
+                      if (val && !editTags.includes(val)) {
+                        editTags = [...editTags, val];
+                      }
+                      (e.target as HTMLInputElement).value = '';
+                    }
+                  }}
+                />
+              </div>
+            </div>
+          </div>
+        {/if}
+
+        <!-- Tab 2: Attachments Shelf -->
+        {#if activeSidebarTab === 'attachments'}
+          <div class="attachments-shelf">
+            <!-- Drag & Drop Uploader -->
+            <!-- svelte-ignore a11y_no_static_element_interactions -->
+            <div 
+              class="drag-upload-zone {isDragOver ? 'dragover' : ''} {uploadingAttachment ? 'uploading' : ''}"
+              ondragover={(e) => { e.preventDefault(); isDragOver = true; }}
+              ondragleave={() => { isDragOver = false; }}
+              ondrop={handleDrop}
+            >
+              <input 
+                type="file" 
+                id="file-upload" 
+                class="hidden-file-input" 
+                onchange={handleUploadAttachment} 
+                disabled={uploadingAttachment}
+              />
+              <label for="file-upload" class="upload-zone-label">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-upload-cloud"><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"/><path d="M12 12v9"/><path d="m15 15-3-3-3 3"/></svg>
+                <span>{uploadingAttachment ? '正在上传文件...' : '拖拽文件至此 或 点击上传'}</span>
+              </label>
+            </div>
+
+            <!-- Attachments list -->
+            {#if editAttachments.length === 0}
+              <p class="no-attachments-text">本条目尚无附件</p>
+            {:else}
+              <div class="edit-attachments-list">
+                {#each editAttachments as att}
+                  <div class="attachment-item-card">
+                    <div class="att-type-label">{getFileExt(att.name)}</div>
+                    <div class="att-meta">
+                      <span class="att-name" title={att.name}>{att.name}</span>
+                      <span class="att-size">{formatBytes(att.size)}</span>
+                    </div>
+                    <div class="att-actions">
+                      <button class="att-btn" onclick={() => insertAttachment(att)} title="插入至正文">
+                        插入
+                      </button>
+                      <button class="att-btn danger" onclick={() => removeAttachment(att.name)} title="解绑附件">
+                        解绑
+                      </button>
+                    </div>
+                  </div>
+                {/each}
+              </div>
+            {/if}
+          </div>
+        {/if}
       </aside>
+    </div>
+  {/if}
+
+  {#if contextMenu.show}
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div 
+      class="custom-context-menu" 
+      style="position: fixed; top: {contextMenu.y}px; left: {contextMenu.x}px; z-index: 10000;"
+      onclick={(e) => e.stopPropagation()}
+    >
+      <button class="context-menu-item" onclick={() => { syncPreviewToLine(contextMenu.line); contextMenu.show = false; }}>
+        聚焦渲染视区
+      </button>
     </div>
   {/if}
 </div>
@@ -442,6 +922,7 @@
   .editor-header-title h2 {
     font-size: 16px;
     font-weight: 600;
+    margin: 0;
   }
 
   .file-path-badge {
@@ -490,6 +971,34 @@
     font-weight: 600;
   }
 
+  .props-toggle-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 34px;
+    padding: 0 12px;
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--text-muted);
+    background: var(--bg-paper);
+    border: 1px solid var(--border-fine);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.22s ease;
+    font-family: var(--font-sans);
+  }
+
+  .props-toggle-btn:hover {
+    border-color: var(--text-muted);
+    color: var(--text-ink);
+  }
+
+  .props-toggle-btn.collapsed {
+    color: var(--accent-ochre);
+    border-color: var(--accent-ochre);
+    background: var(--bg-card-hover);
+  }
+
   .action-buttons {
     display: flex;
     gap: 8px;
@@ -523,26 +1032,28 @@
     to { transform: rotate(360deg); }
   }
 
-  /* Body split layout */
   .editor-body-layout {
     flex: 1;
     display: flex;
     overflow: hidden;
   }
 
-  /* Workspaces: Split / Edit / Preview */
   .editor-main-workspace {
     flex: 1;
     display: flex;
     overflow: hidden;
   }
 
-  .editor-main-workspace.edit {
-    grid-template-columns: 1fr;
+  /* Workspace split / edit / preview configurations */
+  .editor-main-workspace.edit .editor-pane {
+    flex: 1;
+    width: 100%;
+    border-right: none;
   }
-
-  .editor-main-workspace.preview {
-    grid-template-columns: 1fr;
+  
+  .editor-main-workspace.preview .preview-pane {
+    flex: 1;
+    width: 100%;
   }
 
   .editor-main-workspace.split {
@@ -551,104 +1062,207 @@
     gap: 0;
   }
 
+  .editor-pane.hidden, .preview-pane.hidden {
+    display: none !important;
+  }
+
   .editor-pane {
     display: flex;
     flex-direction: column;
     border-right: 1px solid var(--border-fine);
     overflow: hidden;
     background: var(--bg-paper);
+    box-sizing: border-box;
+    height: 100%;
   }
 
-  .editor-fields-box {
-    padding: 20px;
-    border-bottom: 1px solid var(--border-fine);
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    background: var(--bg-card);
-  }
-
-  .form-group {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    text-align: left;
-  }
-
-  .form-group label {
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--text-muted);
-    font-family: var(--font-sans);
-  }
-
-  .title-input {
-    font-size: 15px;
-    font-weight: 600;
-    font-family: var(--font-serif);
-    border-radius: 6px;
-  }
-
-  .editor-textarea {
+  .codemirror-editor-container {
     flex: 1;
-    width: 100%;
-    border: none;
-    resize: none;
-    padding: 24px;
-    font-family: monospace;
-    font-size: 13.5px;
-    line-height: 1.6;
-    background: var(--bg-paper);
-    color: var(--text-ink);
-    outline: none;
-    overflow-y: auto;
+    overflow: hidden;
+    text-align: left;
+    height: 100%;
+  }
+
+  .codemirror-editor-container :global(.cm-editor) {
+    height: 100%;
   }
 
   .preview-pane {
+    position: relative;
     padding: 40px;
     overflow-y: auto;
     background: var(--bg-paper);
     text-align: left;
-  }
-
-  .preview-title {
-    font-family: var(--font-serif);
-    font-size: 26px;
-    font-weight: 700;
-    margin-bottom: 24px;
-    border-bottom: 1px dashed var(--border-fine);
-    padding-bottom: 16px;
+    box-sizing: border-box;
+    height: 100%;
   }
 
   /* Properties Sidebar */
   .editor-props-sidebar {
-    width: 280px;
+    width: 300px;
     border-left: 1px solid var(--border-fine);
     background: var(--bg-card);
     padding: 24px;
     overflow-y: auto;
     display: flex;
     flex-direction: column;
-    gap: 24px;
+    gap: 16px;
+    flex-shrink: 0;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-sizing: border-box;
+  }
+
+  .editor-props-sidebar.collapsed {
+    width: 0;
+    padding: 0;
+    border-left: none;
+    overflow: hidden;
+  }
+
+  /* Tabs Layout */
+  .sidebar-tabs {
+    display: flex;
+    border-bottom: 1px solid var(--border-fine);
+    margin-bottom: 8px;
+    gap: 8px;
+  }
+
+  .sidebar-tab-btn {
+    flex: 1;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 8px 12px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-family: var(--font-sans), sans-serif;
+  }
+
+  .sidebar-tab-btn:hover {
+    color: var(--text-ink);
+  }
+
+  .sidebar-tab-btn.active {
+    color: var(--accent-ochre);
+    border-bottom-color: var(--accent-ochre);
+  }
+
+  /* Properties Grid (Notion-style) */
+  .properties-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .property-row {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .property-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--text-muted);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-family: var(--font-sans), sans-serif;
+    user-select: none;
+  }
+
+  .property-label svg {
+    color: var(--text-muted);
     flex-shrink: 0;
   }
 
-  .props-section {
+  .property-value {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 4px;
+    min-width: 0;
     text-align: left;
   }
 
-  .props-section-title {
-    font-size: 12px;
+  .property-textarea {
+    width: 100%;
+    font-size: 16px;
     font-weight: 700;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    font-family: var(--font-sans);
+    color: var(--text-ink);
+    border: none;
+    background: transparent;
+    outline: none;
+    resize: none;
+    padding: 6px 0;
+    font-family: var(--font-serif), Georgia, serif;
+    border-bottom: 1px dashed var(--border-fine);
+    transition: border-color 0.2s ease;
+    line-height: 1.4;
+  }
+
+  .property-textarea:focus {
+    border-bottom-style: solid;
+    border-bottom-color: var(--accent-ochre);
+  }
+
+  .property-input {
+    border: none;
     border-bottom: 1px solid var(--border-fine);
-    padding-bottom: 6px;
+    background: transparent;
+    font-size: 13px;
+    color: var(--text-ink);
+    padding: 6px 0;
+    width: 100%;
+    outline: none;
+    transition: all 0.2s ease;
+  }
+
+  .property-input:focus {
+    border-bottom-color: var(--accent-ochre);
+  }
+
+  .filename-input {
+    font-family: monospace;
+    font-size: 12px;
+  }
+
+  .property-select {
+    border: 1px solid var(--border-fine);
+    border-radius: 4px;
+    background: var(--bg-paper);
+    color: var(--text-ink);
+    padding: 6px;
+    font-size: 12.5px;
+    width: 100%;
+    outline: none;
+    cursor: pointer;
+  }
+
+  .property-info-tip {
+    font-size: 9.5px;
+    color: var(--accent-terracotta);
+    margin-top: 2px;
+    display: block;
+    line-height: 1.3;
+  }
+
+  .tags-value {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .tag-input-box {
+    border: 1px solid var(--border-fine) !important;
+    border-radius: 4px !important;
+    padding: 6px 8px !important;
+    background: var(--bg-paper) !important;
+    font-size: 12px !important;
   }
 
   .tag-input-container {
@@ -673,7 +1287,7 @@
     font-size: 11px;
     color: var(--text-muted);
     gap: 4px;
-    font-family: var(--font-sans);
+    font-family: var(--font-sans), sans-serif;
     font-weight: 500;
   }
 
@@ -696,13 +1310,13 @@
     color: #ef4444;
   }
 
-  .tag-input-box {
-    border-radius: 4px;
-    height: 32px;
-    font-size: 12px;
+  /* File drag uploader */
+  .attachments-shelf {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
   }
 
-  /* File drag uploader */
   .drag-upload-zone {
     border: 1.5px dashed var(--border-fine);
     border-radius: 6px;
@@ -743,7 +1357,7 @@
   .upload-zone-label span {
     font-size: 11px;
     font-weight: 500;
-    font-family: var(--font-sans);
+    font-family: var(--font-sans), sans-serif;
     line-height: 1.3;
   }
 
@@ -751,6 +1365,8 @@
     font-size: 12px;
     color: var(--text-muted);
     font-style: italic;
+    margin: 0;
+    text-align: left;
   }
 
   .edit-attachments-list {
@@ -795,11 +1411,13 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    text-align: left;
   }
 
   .att-size {
     font-size: 10px;
     color: var(--text-muted);
+    text-align: left;
   }
 
   .att-actions {
@@ -818,7 +1436,7 @@
     background: var(--bg-card);
     border: 1px solid var(--border-fine);
     color: var(--text-ink);
-    font-family: var(--font-sans);
+    font-family: var(--font-sans), sans-serif;
     transition: all 0.15s ease;
   }
 
@@ -833,5 +1451,51 @@
 
   .att-btn.danger:hover {
     background: #fef2f2;
+  }
+
+  .new-topic-input-wrapper {
+    animation: slideDown 0.2s ease;
+    margin-top: 4px;
+  }
+
+  @keyframes slideDown {
+    from { opacity: 0; transform: translateY(-8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* Custom Context Menu - Modern Floating Card Design */
+  .custom-context-menu {
+    background: var(--bg-card);
+    border: 1px solid var(--border-fine);
+    border-radius: 6px;
+    box-shadow: 0 10px 20px -5px rgba(0, 0, 0, 0.08), 0 4px 6px -2px rgba(0, 0, 0, 0.04);
+    min-width: 150px;
+    padding: 4px;
+    display: flex;
+    flex-direction: column;
+    z-index: 10000;
+    font-family: var(--font-sans), sans-serif;
+  }
+
+  .context-menu-item {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    padding: 8px 12px;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-ink);
+    border-radius: 4px;
+    transition: all 0.18s ease;
+    font-family: inherit;
+  }
+
+  .context-menu-item:hover {
+    background: var(--bg-card-hover);
+    color: var(--accent-ochre);
   }
 </style>

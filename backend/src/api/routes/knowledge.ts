@@ -295,6 +295,9 @@ knowledgeRoutes.openapi(updateEntryRoute, async (c) => {
       content: body.content,
       tags: body.tags,
       source: body.source,
+      category: body.category,
+      storage_name: body.storage_name,
+      attachments: body.attachments,
     });
     return c.json({ status: "updated" }, 200);
   } catch (err: any) {
