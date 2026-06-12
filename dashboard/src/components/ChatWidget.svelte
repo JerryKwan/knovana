@@ -2,8 +2,7 @@
 
 <script lang="ts">
   import { onMount, tick } from "svelte";
-  import { marked } from "marked";
-  import DOMPurify from "dompurify";
+  import Markdown from "./Markdown.svelte";
 
   // Declare props as custom element attributes
   let {
@@ -34,10 +33,21 @@
   let generating = $state(false);
   let statusText = $state("");
   let statusIndicator = $state<'thinking' | 'tool' | 'loading'>('thinking');
+  let currentAbortController = $state<AbortController | null>(null);
   let loadingHistory = $state(false);
   let loadingSessions = $state(false);
+  let loadingMoreSessions = $state(false);
+  let sessionsTotal = $state(0);
+  let sessionsNextPage = $state(1);
+  let sessionsListError = $state("");
+  let deletingSessionId = $state<string | null>(null);
+
+  const SESSION_PAGE_SIZE = 20;
+
+  let hasMoreSessions = $derived(sessions.length < sessionsTotal);
 
   let chatHistoryEl = $state<HTMLElement | null>(null);
+  let composerTextarea = $state<HTMLTextAreaElement | null>(null);
   let widgetEl = $state<HTMLElement | null>(null);
   let copiedMessageId = $state<string | null>(null);
 
@@ -179,23 +189,102 @@
     }
   }
 
-  // Load user sessions list
-  async function loadSessions() {
-    if (isBlocked) return;
-    loadingSessions = true;
+  function mergeSessions(currentSessions: any[], incomingSessions: any[]) {
+    return [
+      ...currentSessions,
+      ...incomingSessions.filter(
+        (session, index) =>
+          !currentSessions.some((current) => current.id === session.id) &&
+          incomingSessions.findIndex((incoming) => incoming.id === session.id) === index,
+      ),
+    ];
+  }
+
+  function formatRelativeTime(dateStr: string): string {
     try {
-      const res = await apiRequest<{ sessions: any[] }>('GET', '/api/v1/chat/sessions?page=1&per_page=50');
-      sessions = res.sessions || [];
-      
-      // If we don't have an active session but there are sessions, select the first one
-      if (!activeSessionId && sessions.length > 0) {
+      const date = new Date(dateStr);
+      if (isNaN(date.getTime())) return dateStr;
+
+      const now = new Date();
+      const diffMs = now.getTime() - date.getTime();
+      const diffMins = Math.floor(diffMs / 60000);
+
+      const isSameLocalDay = (a: Date, b: Date) =>
+        a.getFullYear() === b.getFullYear() &&
+        a.getMonth() === b.getMonth() &&
+        a.getDate() === b.getDate();
+
+      const formatLocalTime = (value: Date) =>
+        new Intl.DateTimeFormat(undefined, {
+          hour: "2-digit",
+          minute: "2-digit",
+        }).format(value);
+
+      const formatLocalDateTime = (value: Date, includeYear: boolean) =>
+        new Intl.DateTimeFormat(undefined, {
+          year: includeYear ? "numeric" : undefined,
+          month: "numeric",
+          day: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        }).format(value);
+
+      if (diffMs >= 0 && diffMins < 1) return "刚刚";
+      if (diffMs >= 0 && diffMins < 60 && isSameLocalDay(date, now)) return `${diffMins}分钟前`;
+
+      const localTime = formatLocalTime(date);
+      if (isSameLocalDay(date, now)) return localTime;
+
+      const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+      if (isSameLocalDay(date, yesterday)) return `昨天 ${localTime}`;
+      if (date.getFullYear() === now.getFullYear()) return formatLocalDateTime(date, false);
+      return formatLocalDateTime(date, true);
+    } catch {
+      return dateStr;
+    }
+  }
+
+  // Load user sessions list
+  async function loadSessions(page = 1, mode: "replace" | "append" = "replace") {
+    if (isBlocked) return;
+
+    const append = mode === "append";
+    if (append) {
+      loadingMoreSessions = true;
+    } else {
+      loadingSessions = true;
+      deletingSessionId = null;
+    }
+    sessionsListError = "";
+
+    try {
+      const res = await apiRequest<{ sessions: any[]; total: number; page: number }>(
+        "GET",
+        `/api/v1/chat/sessions?page=${page}&per_page=${SESSION_PAGE_SIZE}`,
+      );
+      const incoming = res.sessions || [];
+      sessions = append ? mergeSessions(sessions, incoming) : incoming;
+      sessionsTotal = res.total ?? sessions.length;
+      sessionsNextPage = (res.page ?? page) + 1;
+
+      if (!append && !showSessions && !activeSessionId && sessions.length > 0) {
         selectSession(sessions[0].id);
       }
     } catch (err) {
+      sessionsListError = err instanceof Error ? err.message : "加载会话列表失败";
       console.error("Failed to load sessions", err);
     } finally {
-      loadingSessions = false;
+      if (append) {
+        loadingMoreSessions = false;
+      } else {
+        loadingSessions = false;
+      }
     }
+  }
+
+  async function loadMoreSessions() {
+    if (loadingSessions || loadingMoreSessions || !hasMoreSessions) return;
+    await loadSessions(sessionsNextPage, "append");
   }
 
   // Create a brand new session
@@ -239,19 +328,32 @@
     }
   }
 
-  // Delete a session
-  async function deleteSession(sessionId: string, event: MouseEvent) {
+  function askDeleteSession(sessionId: string, event: MouseEvent) {
     event.stopPropagation();
-    if (!confirm("确定要删除该对话会话吗？")) return;
+    deletingSessionId = sessionId;
+  }
+
+  function cancelDeleteSession(event: MouseEvent) {
+    event.stopPropagation();
+    deletingSessionId = null;
+  }
+
+  async function executeDeleteSession(sessionId: string, event: MouseEvent) {
+    event.stopPropagation();
     try {
-      await apiRequest('DELETE', `/api/v1/chat/sessions/${sessionId}`);
+      await apiRequest("DELETE", `/api/v1/chat/sessions/${sessionId}`);
       if (activeSessionId === sessionId) {
         activeSessionId = null;
         messages = [];
         sessionTitle = "智能会话";
       }
-      await loadSessions();
+      sessions = sessions.filter((session) => session.id !== sessionId);
+      sessionsTotal = Math.max(0, sessionsTotal - 1);
+      sessionsNextPage = Math.max(1, Math.floor(sessions.length / SESSION_PAGE_SIZE) + 1);
+      deletingSessionId = null;
     } catch (err) {
+      sessionsListError = err instanceof Error ? err.message : "删除会话失败";
+      deletingSessionId = null;
       console.error("Failed to delete session", err);
     }
   }
@@ -277,6 +379,9 @@
     generating = true;
     statusText = "正在唤醒智能助手...";
     statusIndicator = "loading";
+    
+    const abortController = new AbortController();
+    currentAbortController = abortController;
     
     let assistantMsgId = `msg_assistant_${Date.now()}`;
     // Immediately append assistant placeholder message
@@ -321,7 +426,8 @@
           "Content-Type": "application/json",
           "Authorization": tokenHeader
         },
-        body: JSON.stringify(body)
+        body: JSON.stringify(body),
+        signal: abortController.signal
       });
       
       if (!res.ok) {
@@ -340,7 +446,7 @@
           statusText = "思考中...";
           statusIndicator = "thinking";
         } else if (chunk.type === "session_created") {
-          if (!activeSessionId) {
+          if (activeSessionId !== chunk.session_id) {
             activeSessionId = chunk.session_id;
             loadSessions();
           }
@@ -482,17 +588,33 @@
         }
       });
     } catch (err: any) {
-      console.error("Streaming error", err);
-      statusText = `连接助手失败: ${err.message || "未知网络错误"}`;
-      const idx = messages.findIndex(m => m.id === assistantMsgId);
-      if (idx !== -1) {
-        messages[idx].error = err.message || "未知网络错误";
-        messages = [...messages];
+      const isAbort = err?.name === 'AbortError' || String(err).includes('AbortError');
+      if (isAbort) {
+        statusText = "";
+      } else {
+        console.error("Streaming error", err);
+        statusText = `连接助手失败: ${err.message || "未知网络错误"}`;
+        const idx = messages.findIndex(m => m.id === assistantMsgId);
+        if (idx !== -1) {
+          messages[idx].error = err.message || "未知网络错误";
+          messages = [...messages];
+        }
       }
     } finally {
       generating = false;
+      currentAbortController = null;
       await loadSessions();
     }
+  }
+
+  // Stop current generation
+  function stopGeneration() {
+    if (currentAbortController) {
+      currentAbortController.abort();
+      currentAbortController = null;
+    }
+    generating = false;
+    statusText = "";
   }
 
   // Regenerate last response
@@ -502,6 +624,9 @@
     generating = true;
     statusText = "正在重新思考...";
     statusIndicator = "loading";
+    
+    const abortController = new AbortController();
+    currentAbortController = abortController;
     
     const lastMsg = messages[messages.length - 1];
     if (lastMsg && lastMsg.role === "assistant") {
@@ -546,7 +671,8 @@
           "Content-Type": "application/json",
           "Authorization": tokenHeader
         },
-        body: JSON.stringify({ session_id: activeSessionId })
+        body: JSON.stringify({ session_id: activeSessionId }),
+        signal: abortController.signal
       });
       
       if (!res.ok) {
@@ -564,6 +690,11 @@
           }
           statusText = "思考中...";
           statusIndicator = "thinking";
+        } else if (chunk.type === "session_created") {
+          if (activeSessionId !== chunk.session_id) {
+            activeSessionId = chunk.session_id;
+            loadSessions();
+          }
         } else if (chunk.type === "status") {
           statusText = chunk.text || "";
           statusIndicator = chunk.indicator || "thinking";
@@ -702,15 +833,21 @@
         }
       });
     } catch (err: any) {
-      console.error("Regeneration error", err);
-      statusText = `重新生成回答失败: ${err.message || "未知网络错误"}`;
-      const idx = messages.findIndex(m => m.id === assistantMsgId);
-      if (idx !== -1) {
-        messages[idx].error = err.message || "未知网络错误";
-        messages = [...messages];
+      const isAbort = err?.name === 'AbortError' || String(err).includes('AbortError');
+      if (isAbort) {
+        statusText = "";
+      } else {
+        console.error("Regeneration error", err);
+        statusText = `重新生成回答失败: ${err.message || "未知网络错误"}`;
+        const idx = messages.findIndex(m => m.id === assistantMsgId);
+        if (idx !== -1) {
+          messages[idx].error = err.message || "未知网络错误";
+          messages = [...messages];
+        }
       }
     } finally {
       generating = false;
+      currentAbortController = null;
     }
   }
 
@@ -865,30 +1002,27 @@
     window.addEventListener('mouseup', stopResize);
   }
 
-  // Markdown compiler helper
-  function renderMarkdown(content: string): string {
-    if (!content) return "";
-    try {
-      let html = marked.parse(content) as string;
-      return DOMPurify.sanitize(html);
-    } catch {
-      return content;
-    }
-  }
-
   // Check if last message is assistant (for regenerate button)
   function isLastMessageAssistant(): boolean {
     if (messages.length === 0) return false;
     return messages[messages.length - 1].role === "assistant";
   }
 
+  async function focusComposer() {
+    await tick();
+    composerTextarea?.focus();
+  }
+
   // Toggle Minimize
   function toggleMinimized() {
     isMinimized = !isMinimized;
-    if (!isMinimized && sessions.length === 0) {
-      loadSessions();
+    if (!isMinimized) {
+      if (sessions.length === 0) {
+        loadSessions();
+      }
+      scrollToBottom();
+      void focusComposer();
     }
-    scrollToBottom();
   }
 
   // Lifecycle
@@ -985,7 +1119,7 @@
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
             </button>
           {:else}
-            <button class="header-icon-btn" onclick={() => { showSessions = true; loadSessions(); }} title="会话列表">
+            <button class="header-icon-btn" onclick={() => { showSessions = true; void loadSessions(1, 'replace'); }} title="会话列表">
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="3" x2="21" y1="6" y2="6"/><line x1="3" x2="21" y1="12" y2="12"/><line x1="3" x2="21" y1="18" y2="18"/></svg>
             </button>
           {/if}
@@ -1021,37 +1155,105 @@
                 + 开启新的对话
               </button>
             </div>
-            <div class="sessions-list-scroll">
-              {#if loadingSessions}
-                <div class="widget-loading">载入会话列表中...</div>
+            <div class="sessions-list-scroll kn-scrollbar">
+              {#if sessionsListError}
+                <p class="sessions-error">{sessionsListError}</p>
+              {/if}
+
+              {#if loadingSessions && sessions.length === 0}
+                <div class="sessions-skeleton-list">
+                  <div></div>
+                  <div></div>
+                  <div></div>
+                </div>
               {:else if sessions.length === 0}
-                <div class="widget-empty">没有历史会话记录</div>
+                <div class="widget-empty">暂无历史对话记录</div>
               {:else}
                 <div class="sessions-grid">
-                  {#each sessions as sess}
+                  {#each sessions as sess (sess.id)}
                     <!-- svelte-ignore a11y_click_events_have_key_events -->
                     <!-- svelte-ignore a11y_no_static_element_interactions -->
-                    <div 
-                       class="session-item-card" 
-                       class:selected={activeSessionId === sess.id}
-                       onclick={() => selectSession(sess.id)}
+                    <div
+                      class="session-item-card"
+                      class:selected={activeSessionId === sess.id}
+                      class:confirming={deletingSessionId === sess.id}
+                      onclick={() => deletingSessionId !== sess.id && selectSession(sess.id)}
                     >
-                      <div class="session-card-info">
-                        <div class="session-card-title">{sess.title || '无标题会话'}</div>
-                        <div class="session-card-meta">
-                          <span>💬 {sess.message_count || 0} 条消息</span>
+                      {#if deletingSessionId === sess.id}
+                        <!-- svelte-ignore a11y_click_events_have_key_events -->
+                        <!-- svelte-ignore a11y_no_static_element_interactions -->
+                        <div class="delete-confirm-box" onclick={(e) => e.stopPropagation()}>
+                          <span class="confirm-text">确定删除此会话吗？</span>
+                          <div class="confirm-actions">
+                            <button
+                              type="button"
+                              class="confirm-btn yes"
+                              onclick={(e) => executeDeleteSession(sess.id, e)}
+                            >
+                              确认
+                            </button>
+                            <button
+                              type="button"
+                              class="confirm-btn no"
+                              onclick={cancelDeleteSession}
+                            >
+                              取消
+                            </button>
+                          </div>
                         </div>
-                      </div>
-                      <button 
-                        class="session-delete-btn" 
-                        onclick={(e) => deleteSession(sess.id, e)} 
-                        title="删除会话"
-                        aria-label="删除会话"
-                      >
-                        🗑️
-                      </button>
+                      {:else}
+                        <div class="session-card-info">
+                          <div class="session-card-title" title={sess.title}>{sess.title || '无标题会话'}</div>
+                          <div class="session-card-meta">
+                            <span>{sess.message_count || 0} 条消息</span>
+                            {#if sess.updated_at}
+                              <span class="meta-dot">•</span>
+                              <span>{formatRelativeTime(sess.updated_at)}</span>
+                            {/if}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          class="session-delete-btn"
+                          onclick={(e) => askDeleteSession(sess.id, e)}
+                          title="删除会话"
+                          aria-label="删除会话"
+                        >
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M3 6h18" />
+                            <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+                            <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+                          </svg>
+                        </button>
+                      {/if}
                     </div>
                   {/each}
+                </div>
+
+                <div class="sessions-list-footer">
+                  {#if hasMoreSessions}
+                    <button
+                      type="button"
+                      class="load-more-btn"
+                      disabled={loadingSessions || loadingMoreSessions}
+                      onclick={loadMoreSessions}
+                    >
+                      {#if loadingMoreSessions}
+                        <svg class="load-more-spinner" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                          <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                        </svg>
+                        <span>加载中...</span>
+                      {:else}
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                          <path d="M5 12h14" />
+                          <path d="M12 5v14" />
+                        </svg>
+                        <span>加载更多</span>
+                      {/if}
+                    </button>
+                  {:else}
+                    <span class="sessions-end-hint">已加载全部 {sessionsTotal} 条</span>
+                  {/if}
                 </div>
               {/if}
             </div>
@@ -1064,6 +1266,7 @@
                 <div class="widget-loading">正在提取聊天记录...</div>
               {:else if messages.length === 0}
                 <div class="chat-welcome">
+                  <div class="chat-welcome-inner">
                   <div class="welcome-avatar-container">
                     <svg class="welcome-k-svg" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
                       <defs>
@@ -1103,8 +1306,9 @@
                       </g>
                     </svg>
                   </div>
-                  <h3>Knovana AI 智能助手</h3>
-                  <p>您可以问我关于知识库整理、Markdown 格式优化、专题归纳的任何问题，我会竭诚为您提供分析和编写服务。</p>
+                  <h2>让每一次交互在此沉淀</h2>
+                  <p>打捞喧嚣世界的碎片，筑起属于你的思想灯塔</p>
+                  </div>
                 </div>
               {:else}
                 <div class="messages-list">
@@ -1206,9 +1410,7 @@
                               {#each (msg.blocks && msg.blocks.length > 0 ? msg.blocks : [{ type: 'text', text: msg.content || "" }]) as block, bIdx (bIdx)}
                                 {#if block.type === 'text'}
                                   {#if block.text}
-                                    <div class="markdown-rich-content">
-                                      {@html renderMarkdown(block.text)}
-                                    </div>
+                                    <Markdown content={block.text} {apiUrl} {token} />
                                   {/if}
                                 {:else}
                                   {#if block.type === 'thinking'}
@@ -1235,7 +1437,7 @@
                                           </span>
                                         </summary>
                                         <div class="thinking-content">
-                                          {block.text}
+                                          <Markdown content={block.text} {apiUrl} {token} />
                                         </div>
                                       </details>
                                     {/if}
@@ -1348,6 +1550,7 @@
             <div class="composer-container">
               <div class="composer-card">
                 <textarea
+                  bind:this={composerTextarea}
                   class="composer-textarea"
                   placeholder="向 Knovana 提问..."
                   bind:value={chatInput}
@@ -1362,18 +1565,31 @@
                 <div class="composer-toolbar">
                   <div class="toolbar-left"></div>
                   <div class="toolbar-right">
-                    <button 
-                      class="widget-send-btn" 
-                      onclick={sendChatMessage} 
-                      disabled={generating || !chatInput.trim()}
-                      title="发送"
-                      aria-label="发送"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="m22 2-7 20-4-9-9-4Z"/>
-                        <path d="M22 2 11 13"/>
-                      </svg>
-                    </button>
+                    {#if generating}
+                      <button
+                        type="button"
+                        class="stop-btn"
+                        onclick={stopGeneration}
+                        title="停止生成"
+                        aria-label="停止生成"
+                      >
+                        <span class="stop-icon"></span>
+                      </button>
+                    {:else}
+                      <button
+                        type="button"
+                        class="send-btn"
+                        onclick={sendChatMessage}
+                        disabled={!chatInput.trim()}
+                        title="发送"
+                        aria-label="发送"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                          <path d="m22 2-7 20-4-9-9-4Z"/>
+                          <path d="M22 2 11 13"/>
+                        </svg>
+                      </button>
+                    {/if}
                   </div>
                 </div>
               </div>
@@ -1388,22 +1604,45 @@
 <style>
   /* Fully scoped custom element styles for Shadow DOM */
   
-  :host {
-    /* Set Outfit / Lora font stacks locally in shadow root */
-    --font-sans: "Outfit", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    --font-serif: "Lora", Georgia, "Times New Roman", serif;
-    --bg-paper: #fcfbf9;
-    --bg-card: #f5f4ef;
-    --bg-card-hover: #ebeae4;
-    --text-ink: #1c1c1a;
-    --text-muted: #5e5c54;
-    --border-fine: #e6e4dc;
-    --accent-ochre: #b25a38;
-    --accent-terracotta: #a04724;
+  /* :host for custom-element Shadow DOM; .knovana-chat-container for dashboard embed */
+  :host,
+  .knovana-chat-container {
+    /* Warm Paper Palette — synced with Extension */
+    --font-sans: 'Aptos', 'Inter', 'Segoe UI', ui-sans-serif, system-ui, sans-serif;
+    --font-serif: 'Lora', Georgia, 'Times New Roman', serif;
+    --font-mono: 'Cascadia Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+
+    --kn-bg: #faf8f4;
+    --kn-bg-raised: #fdfcf9;
+    --kn-bg-subtle: #f2efe8;
+    --kn-text: #2c2825;
+    --kn-text-muted: #8a7f72;
+    --kn-border: #ddd8d0;
+    --kn-border-strong: #ccc7be;
+    --kn-primary: #3c342f;
+    --kn-primary-ink: #faf8f4;
+    --kn-primary-soft: #f0e9df;
+    --kn-accent: #a08470;
+    --kn-danger: #b94a4a;
+    --kn-shadow-soft: 0 6px 18px rgb(44 40 37 / 0.06);
+    --kn-shadow-panel: 0 18px 48px rgb(44 40 37 / 0.1);
+
+    /* Aliases for existing selectors */
+    --bg-paper: var(--kn-bg);
+    --bg-card: var(--kn-bg-subtle);
+    --bg-card-hover: #e8e5dd;
+    --text-ink: var(--kn-text);
+    --text-muted: var(--kn-text-muted);
+    --border-fine: var(--kn-border);
+    --accent-ochre: var(--kn-accent);
+    --accent-terracotta: #8a7060;
     --accent-sage: #4a6b5d;
-    
+
     font-family: var(--font-sans);
     color: var(--text-ink);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: geometricPrecision;
   }
 
   * {
@@ -1576,7 +1815,7 @@
   }
 
   .header-icon-btn.close:hover {
-    color: #ef4444;
+    color: var(--kn-danger);
     background: #fee2e2;
   }
 
@@ -1673,6 +1912,8 @@
   /* Scroll areas */
   .chat-messages-container {
     flex: 1;
+    display: flex;
+    flex-direction: column;
     overflow-y: auto;
     padding: 16px; /* Balanced left and right margins */
   }
@@ -1702,19 +1943,23 @@
   }
 
   .chat-welcome {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
+    display: grid;
+    flex: 1;
+    place-items: center;
+    min-height: 100%;
+    padding: 32px 24px;
     text-align: center;
-    padding: 60px 10px;
-    color: var(--text-muted);
+  }
+
+  .chat-welcome-inner {
+    display: grid;
+    max-width: 300px;
+    justify-items: center;
   }
 
   .welcome-avatar-container {
-    width: 48px;
-    height: 48px;
-    margin-bottom: 12px;
+    width: 44px;
+    height: 44px;
     filter: drop-shadow(0 6px 12px rgba(28, 28, 26, 0.08));
   }
 
@@ -1723,18 +1968,22 @@
     height: 100%;
   }
 
-  .chat-welcome h3 {
+  .chat-welcome h2 {
+    margin: 16px 0 8px;
     font-family: var(--font-sans);
     font-size: 15px;
-    font-weight: 700;
-    margin-bottom: 6px;
-    color: var(--text-ink);
+    font-weight: 500;
+    line-height: 1.4;
+    color: var(--kn-text);
+    letter-spacing: 0.04em;
   }
 
   .chat-welcome p {
-    font-size: 12px;
-    line-height: 1.5;
-    max-width: 250px;
+    margin: 0;
+    color: var(--kn-text-muted);
+    font-size: 12.5px;
+    line-height: 1.6;
+    letter-spacing: 0.02em;
   }
 
   .messages-list {
@@ -1853,11 +2102,11 @@
   }
 
   .message-row.assistant .message-bubble {
-    background: #ffffff; /* pure white card */
+    background: color-mix(in srgb, var(--kn-bg-subtle) 30%, var(--kn-bg-raised));
     color: var(--text-ink);
-    border: 1px solid var(--border-fine); /* solid border */
-    border-radius: 12px;
-    box-shadow: 0 1px 3px rgba(28, 28, 26, 0.01);
+    border: 1px solid color-mix(in srgb, var(--kn-border) 30%, transparent);
+    border-radius: 16px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.01);
     width: 100%;
     display: flex;
     flex-direction: column;
@@ -1893,11 +2142,11 @@
   }
 
   .tool-name {
-    font-family: monospace;
+    font-family: var(--font-mono);
     background: var(--bg-card);
     padding: 1px 5px;
     border-radius: 4px;
-    color: #a08470;
+    color: var(--kn-accent);
   }
 
   .tool-call-input {
@@ -1910,7 +2159,7 @@
     background: var(--bg-card);
     max-height: 120px;
     overflow: auto;
-    font-family: monospace;
+    font-family: var(--font-mono);
     line-height: 1.6;
     tab-size: 2;
     white-space: pre;
@@ -1927,8 +2176,8 @@
   }
 
   .block-tool-result.error {
-    border-color: #fca5a5;
-    background: #fff5f5;
+    border-color: color-mix(in srgb, var(--kn-danger) 20%, var(--kn-border));
+    background: color-mix(in srgb, var(--kn-danger) 1.5%, var(--kn-bg-raised));
   }
 
   .tool-result-header {
@@ -1949,7 +2198,7 @@
   }
 
   .result-icon.error {
-    color: #ef4444;
+    color: var(--kn-danger);
   }
 
   .result-icon svg {
@@ -1967,8 +2216,8 @@
   }
 
   .status-pill.error {
-    background: rgba(239, 68, 68, 0.1);
-    color: #ef4444;
+    background: color-mix(in srgb, var(--kn-danger) 10%, transparent);
+    color: var(--kn-danger);
   }
 
   .tool-result-output {
@@ -1981,7 +2230,7 @@
     max-height: 250px;
     overflow: auto;
     border-top: 1px dashed var(--border-fine);
-    font-family: monospace;
+    font-family: var(--font-mono);
     font-size: 11.5px;
     line-height: 1.65;
     tab-size: 2;
@@ -2021,7 +2270,7 @@
     background: var(--bg-card);
     max-height: 150px;
     overflow: auto;
-    font-family: monospace;
+    font-family: var(--font-mono);
     line-height: 1.6;
     tab-size: 2;
     white-space: pre;
@@ -2149,105 +2398,12 @@
   }
 
   .thinking-content {
-    padding: 10px 12px;
-    font-size: 12px;
-    border-top: 1px solid var(--border-fine);
-    color: var(--text-muted);
-    background: #ffffff;
-    line-height: 1.55;
-  }
-
-  /* Markdown custom styles inside Chat message bubble */
-  .markdown-rich-content {
-    font-family: var(--font-sans);
-  }
-
-  .markdown-rich-content :global(h1),
-  .markdown-rich-content :global(h2),
-  .markdown-rich-content :global(h3) {
-    font-family: var(--font-sans);
-    font-size: 1.05em;
-    font-weight: 700;
-    margin-top: 10px;
-    margin-bottom: 4px;
-  }
-
-  .markdown-rich-content :global(p) {
-    margin-bottom: 6px;
-  }
-  .markdown-rich-content :global(p:last-child) {
-    margin-bottom: 0;
-  }
-
-  .markdown-rich-content :global(ul),
-  .markdown-rich-content :global(ol) {
-    margin-bottom: 6px;
-    padding-left: 16px;
-  }
-
-  .markdown-rich-content :global(li) {
-    margin-bottom: 2px;
-  }
-
-  .markdown-rich-content :global(code) {
-    font-family: monospace;
-    background: var(--bg-card);
-    padding: 1px 4px;
-    border-radius: 3px;
-    font-size: 0.9em;
-    border: 1px solid var(--border-fine);
-  }
-
-  .markdown-rich-content :global(pre) {
-    background: #252422;
-    color: #f4f3ef;
     padding: 8px 10px;
-    border-radius: 4px;
-    overflow-x: auto;
-    margin: 6px 0;
-  }
-
-  .markdown-rich-content :global(pre code) {
-    background: transparent;
-    border: none;
-    padding: 0;
-    font-size: 0.85em;
-    color: inherit;
-  }
-
-  .markdown-rich-content :global(blockquote) {
-    border-left: 2px solid var(--accent-sage);
-    padding-left: 8px;
-    color: var(--text-muted);
-    margin: 6px 0;
-    font-style: italic;
-  }
-
-  .markdown-rich-content :global(table) {
-    width: 100%;
-    border-collapse: collapse;
-    margin: 10px 0;
-    font-size: 12px;
-    line-height: 1.5;
-  }
-
-  .markdown-rich-content :global(th) {
-    background: var(--bg-card);
-    color: var(--text-ink);
-    font-weight: 600;
-    border: 1px solid var(--border-fine);
-    padding: 6px 10px;
-    text-align: left;
-  }
-
-  .markdown-rich-content :global(td) {
-    border: 1px solid var(--border-fine);
-    padding: 6px 10px;
-    color: var(--text-ink);
-  }
-
-  .markdown-rich-content :global(tr:nth-child(even)) {
-    background: rgba(28, 28, 26, 0.02);
+    font-size: 12.5px;
+    border-top: 1px solid color-mix(in srgb, var(--kn-border) 30%, transparent);
+    color: var(--kn-text-muted);
+    background: var(--kn-bg-raised);
+    line-height: 1.55;
   }
 
   /* Streamlined Composer Card Layout (Extension-style) */
@@ -2259,22 +2415,24 @@
   }
 
   .composer-card {
-    background: #ffffff;
-    border: 1px solid var(--text-ink);
-    border-radius: 12px;
-    padding: 8px 10px 6px;
+    background: var(--kn-bg-raised);
+    border: 1px solid var(--kn-border);
+    border-radius: 16px;
+    padding: 12px 12px 8px 14px;
     display: flex;
     flex-direction: column;
-    gap: 6px;
-    box-shadow: 0 2px 8px rgba(28, 28, 26, 0.04);
-    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    gap: 8px;
+    box-shadow: var(--kn-shadow-soft);
+    transition:
+      border-color 200ms ease,
+      box-shadow 200ms ease;
   }
 
   .composer-card:focus-within {
-    border-color: var(--accent-ochre);
-    box-shadow: 
-      0 4px 12px rgba(28, 28, 26, 0.06),
-      0 0 0 3px rgba(178, 90, 56, 0.08);
+    border-color: color-mix(in srgb, var(--kn-primary) 50%, var(--kn-border));
+    box-shadow:
+      0 4px 20px rgba(0, 0, 0, 0.04),
+      0 0 0 3px color-mix(in srgb, var(--kn-primary) 10%, transparent);
   }
 
   .composer-textarea {
@@ -2301,8 +2459,6 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    border-top: 1px dashed var(--border-fine);
-    padding-top: 6px;
   }
 
   .toolbar-left {
@@ -2317,31 +2473,69 @@
     align-items: center;
   }
 
-  .widget-send-btn {
-    width: 26px;
-    height: 26px;
+  .send-btn {
+    display: grid;
+    width: 32px;
+    height: 32px;
+    place-items: center;
+    border: 0;
     border-radius: 50%;
-    background: var(--text-ink);
-    border: none;
-    color: var(--bg-paper);
+    background: var(--kn-primary, #3c342f);
+    color: var(--kn-primary-ink, #faf8f4);
     cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.2s ease;
-    outline: none;
+    padding: 0;
+    transition:
+      background 150ms ease,
+      transform 150ms ease,
+      opacity 150ms ease;
     flex-shrink: 0;
   }
 
-  .widget-send-btn:hover:not(:disabled) {
-    background: var(--accent-ochre);
+  .send-btn:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--kn-primary, #3c342f) 85%, #000);
     transform: scale(1.05);
   }
 
-  .widget-send-btn:disabled {
-    opacity: 0.35;
+  .send-btn:disabled {
+    opacity: 0.45;
     cursor: not-allowed;
     transform: none;
+  }
+
+  /* Match extension stop button: circular bordered control with square icon */
+  .stop-btn {
+    display: grid;
+    width: 32px;
+    height: 32px;
+    place-items: center;
+    border: 1px solid var(--kn-border, #ddd8d0);
+    border-radius: 50%;
+    background: var(--kn-bg-raised, #fdfcf9);
+    color: var(--kn-text, #2c2825);
+    cursor: pointer;
+    padding: 0;
+    box-shadow: 0 1px 2px rgb(44 40 37 / 0.04);
+    transition:
+      background 150ms ease,
+      transform 150ms ease,
+      border-color 150ms ease,
+      box-shadow 150ms ease;
+    flex-shrink: 0;
+  }
+
+  .stop-btn:hover {
+    background: var(--kn-bg-subtle, #f2efe8);
+    border-color: var(--kn-text-muted, #8a7f72);
+    box-shadow: 0 2px 6px rgb(44 40 37 / 0.06);
+    transform: scale(1.05);
+  }
+
+  .stop-icon {
+    display: block;
+    width: 10px;
+    height: 10px;
+    background: currentColor;
+    border-radius: 2px;
   }
 
   /* Refined Message Action Rails (Extension-style) */
@@ -2420,9 +2614,9 @@
   }
 
   .status-tail.error {
-    color: #ef4444;
-    background: rgba(239, 68, 68, 0.08);
-    border: 1px solid rgba(239, 68, 68, 0.15);
+    color: var(--kn-danger);
+    background: color-mix(in srgb, var(--kn-danger) 8%, transparent);
+    border: 1px solid color-mix(in srgb, var(--kn-danger) 15%, transparent);
     border-radius: 6px;
     padding: 6px 10px;
     word-break: break-all;
@@ -2519,8 +2713,8 @@
 
   .sessions-header {
     padding: 10px 16px;
-    border-bottom: 1px solid var(--border-fine);
-    background: var(--bg-card);
+    border-bottom: 1px solid var(--kn-border);
+    background: color-mix(in srgb, var(--kn-bg-raised) 88%, var(--kn-bg));
   }
 
   .sessions-list-scroll {
@@ -2529,32 +2723,130 @@
     padding: 12px 16px;
   }
 
+  .sessions-error {
+    margin: 0 0 10px;
+    border: 1px solid color-mix(in srgb, var(--kn-danger) 24%, var(--kn-border));
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--kn-danger) 7%, var(--kn-bg-raised));
+    color: var(--kn-danger);
+    font-size: 12px;
+    line-height: 1.55;
+    padding: 10px;
+  }
+
+  .sessions-skeleton-list {
+    display: grid;
+    gap: 9px;
+  }
+
+  .sessions-skeleton-list div {
+    height: 66px;
+    border-radius: 8px;
+    background: linear-gradient(
+      90deg,
+      var(--kn-bg-subtle),
+      var(--kn-bg-raised),
+      var(--kn-bg-subtle)
+    );
+    background-size: 220% 100%;
+    animation: session-shimmer 1.35s ease-in-out infinite;
+  }
+
+  @keyframes session-shimmer {
+    to {
+      background-position: -220% 0;
+    }
+  }
+
   .sessions-grid {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 9px;
   }
 
   .session-item-card {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 9px 12px;
-    background: var(--bg-paper);
-    border: 1px solid var(--border-fine);
-    border-radius: 6px;
+    padding: 12px 14px;
+    background: var(--kn-bg-raised);
+    border: 1px solid var(--kn-border);
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgb(21 39 37 / 0.03);
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition:
+      border-color 150ms ease,
+      transform 150ms ease,
+      box-shadow 150ms ease;
+    min-width: 0;
   }
 
   .session-item-card:hover {
-    border-color: var(--text-ink);
-    background: var(--bg-card);
+    border-color: color-mix(in srgb, var(--kn-primary) 34%, var(--kn-border));
+    box-shadow: var(--kn-shadow-soft);
+    transform: translateY(-0.5px);
   }
 
   .session-item-card.selected {
-    border-color: var(--accent-ochre);
-    background: rgba(178, 90, 56, 0.04);
+    border-color: color-mix(in srgb, var(--kn-primary) 45%, var(--kn-border));
+    background: color-mix(in srgb, var(--kn-primary-soft) 55%, var(--kn-bg-raised));
+  }
+
+  .session-item-card.confirming {
+    border-color: color-mix(in srgb, var(--kn-danger) 45%, var(--kn-border));
+    background: color-mix(in srgb, var(--kn-danger) 4%, var(--kn-bg-raised));
+    cursor: default;
+    transform: none;
+  }
+
+  .delete-confirm-box {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .confirm-text {
+    font-size: 11.5px;
+    font-weight: 700;
+    color: var(--kn-danger);
+  }
+
+  .confirm-actions {
+    display: flex;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+
+  .confirm-btn {
+    border: 0;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 4px 10px;
+    cursor: pointer;
+    transition:
+      background 150ms ease,
+      color 150ms ease;
+  }
+
+  .confirm-btn.yes {
+    background: var(--kn-danger);
+    color: #fff;
+  }
+
+  .confirm-btn.yes:hover {
+    background: color-mix(in srgb, var(--kn-danger) 85%, #000);
+  }
+
+  .confirm-btn.no {
+    background: var(--kn-border);
+    color: var(--kn-text);
+  }
+
+  .confirm-btn.no:hover {
+    background: color-mix(in srgb, var(--kn-border) 80%, #000);
   }
 
   .session-card-info {
@@ -2563,47 +2855,128 @@
     gap: 2px;
     min-width: 0;
     flex: 1;
+    padding-right: 12px;
   }
 
   .session-card-title {
-    font-size: 12.5px;
+    font-size: 12.8px;
     font-weight: 700;
-    color: var(--text-ink);
+    color: var(--kn-text);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
     text-align: left;
+    line-height: 1.45;
   }
 
   .session-card-meta {
-    font-size: 10.5px;
-    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--kn-text-muted);
     text-align: left;
   }
 
-  .session-delete-btn {
-    width: 22px;
-    height: 22px;
-    border-radius: 4px;
-    background: transparent;
-    border: none;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 11px;
-    opacity: 0.4;
-    transition: all 0.15s ease;
-    outline: none;
+  .meta-dot {
+    opacity: 0.5;
   }
 
-  .session-item-card:hover .session-delete-btn {
-    opacity: 0.7;
+  .session-delete-btn {
+    display: grid;
+    place-items: center;
+    width: 26px;
+    height: 26px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--kn-text-muted);
+    cursor: pointer;
+    opacity: 0.5;
+    flex-shrink: 0;
+    padding: 0;
+    transition:
+      opacity 180ms ease,
+      background 150ms ease,
+      color 150ms ease;
+  }
+
+  .session-delete-btn svg {
+    width: 13px;
+    height: 13px;
+  }
+
+  .session-item-card:hover .session-delete-btn,
+  .session-item-card:focus-within .session-delete-btn {
+    opacity: 1;
   }
 
   .session-delete-btn:hover {
-    background: #fee2e2;
-    opacity: 1 !important;
+    background: color-mix(in srgb, var(--kn-danger) 10%, transparent);
+    color: var(--kn-danger);
+    opacity: 1;
+  }
+
+  .sessions-list-footer {
+    display: grid;
+    place-items: center;
+    padding: 12px 0 2px;
+  }
+
+  .load-more-btn {
+    display: inline-flex;
+    min-height: 31px;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    border: 1px solid var(--kn-border);
+    border-radius: 8px;
+    background: var(--kn-bg-subtle);
+    color: var(--kn-text);
+    font-size: 12px;
+    font-weight: 700;
+    padding: 0 12px;
+    cursor: pointer;
+    transition:
+      background 150ms ease,
+      border-color 150ms ease,
+      color 150ms ease;
+  }
+
+  .load-more-btn:hover:not(:disabled) {
+    border-color: color-mix(in srgb, var(--kn-primary) 34%, var(--kn-border));
+    background: var(--kn-primary-soft);
+    color: var(--kn-primary);
+  }
+
+  .load-more-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.65;
+  }
+
+  .load-more-btn svg {
+    width: 13px;
+    height: 13px;
+  }
+
+  .load-more-spinner {
+    animation: session-spin 1s linear infinite;
+  }
+
+  @keyframes session-spin {
+    from {
+      transform: rotate(0deg);
+    }
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  .sessions-end-hint {
+    color: var(--kn-text-muted);
+    font-size: 11.5px;
+    font-weight: 600;
   }
 
   .widget-loading, .widget-empty {

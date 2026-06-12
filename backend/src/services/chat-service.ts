@@ -66,6 +66,7 @@ interface StreamAgentResponseInput {
   intent?: "chat" | "knowledge_entry";
   attachment?: ChatAttachmentInput;
   attachments?: ChatAttachmentInput[];
+  isFirstMessageRegen?: boolean;
 }
 
 export class ChatService {
@@ -216,36 +217,87 @@ export class ChatService {
       throw new Error("No user message found to regenerate.");
     }
 
-    // 2. Prune the Claude Session Store
-    // We count the number of user messages in history prior to the last user message.
+    // 2. Determine if we are regenerating the very first message of the session
     const userMsgs = messages.filter((m) => m.role === "user");
     const k = userMsgs.length - 1; // Number of user messages in history excluding the last one
+    const isFirstMessage = k === 0;
 
-    this.pruneSessionStore(sessionId, k);
+    if (isFirstMessage) {
+      // Clear external session store entries for the old session
+      const store = new KnovanaSessionStore(this.userId);
+      store.delete({ projectKey: this.userId, sessionId });
+      // Clear warm process for the old session
+      const staleWarmQuery = SessionWarmPool.pop(this.userId, sessionId);
+      if (staleWarmQuery) {
+        staleWarmQuery.close();
+      }
 
-    // 3. Delete any assistant messages generated after the last user message from SQLite chat_messages
-    const lastUserMsgIndex = messages.findIndex((m) => m.id === lastUserMsg.id);
-    const messagesToDelete = messages.slice(lastUserMsgIndex + 1);
-    for (const msg of messagesToDelete) {
-      if (msg.role === "assistant") {
+      // Delete the assistant messages from SQLite under the old session ID
+      const messagesToDelete = messages.filter((m) => m.role === "assistant");
+      for (const msg of messagesToDelete) {
         this.messageRepo.deleteMessage(sessionId, msg.id);
       }
-    }
+    } else {
+      // Prune the Claude Session Store for subsequent messages
+      this.pruneSessionStore(sessionId, k);
 
-    // 4. Update the session timestamp
-    this.sessionRepo.updateTimestamp(sessionId);
+      // 3. Delete any assistant messages generated after the last user message from SQLite chat_messages
+      const lastUserMsgIndex = messages.findIndex(
+        (m) => m.id === lastUserMsg.id,
+      );
+      const messagesToDelete = messages.slice(lastUserMsgIndex + 1);
+      for (const msg of messagesToDelete) {
+        if (msg.role === "assistant") {
+          this.messageRepo.deleteMessage(sessionId, msg.id);
+        }
+      }
+
+      // 4. Update the session timestamp
+      this.sessionRepo.updateTimestamp(sessionId);
+    }
 
     // 5. Query the agent
     const agent = this.agentFactory(this.userId, this.kbRoot);
-    const sdkStream = agent.chat(lastUserMsg.content, SYSTEM_PROMPT, sessionId);
+    const sdkStream = agent.chat(
+      lastUserMsg.content,
+      SYSTEM_PROMPT,
+      isFirstMessage ? undefined : sessionId,
+    );
 
     yield* this.streamAgentResponse({
       sdkStream,
       userMessage: lastUserMsg.content,
       sessionId,
       dbInitialized: true,
-      emitSessionCreated: false,
+      emitSessionCreated: isFirstMessage,
+      isFirstMessageRegen: isFirstMessage,
     });
+  }
+
+  private updateSessionId(oldId: string, newId: string): void {
+    const db = getDatabase();
+    db.exec("PRAGMA foreign_keys = OFF;");
+    try {
+      db.exec("BEGIN TRANSACTION;");
+      try {
+        db.prepare("UPDATE chat_sessions SET id = ? WHERE id = ?").run(
+          newId,
+          oldId,
+        );
+        db.prepare(
+          "UPDATE chat_messages SET session_id = ? WHERE session_id = ?",
+        ).run(newId, oldId);
+        db.prepare(
+          "UPDATE claude_session_entries SET session_id = ? WHERE session_id = ?",
+        ).run(newId, oldId);
+        db.exec("COMMIT;");
+      } catch (err) {
+        db.exec("ROLLBACK;");
+        throw err;
+      }
+    } finally {
+      db.exec("PRAGMA foreign_keys = ON;");
+    }
   }
 
   private async *streamAgentResponse({
@@ -257,6 +309,7 @@ export class ChatService {
     intent,
     attachment,
     attachments,
+    isFirstMessageRegen,
   }: StreamAgentResponseInput): AsyncGenerator<PspChunk> {
     const messageStart = this.createMessageStartChunk();
     this.logPspChunk("initial", messageStart);
@@ -267,6 +320,31 @@ export class ChatService {
     for await (const msg of sdkStream) {
       this.logSdkMessage(msg);
       const generatedSessionId = this.getSdkSessionId(msg);
+
+      if (
+        isFirstMessageRegen &&
+        generatedSessionId &&
+        sessionId &&
+        generatedSessionId !== sessionId
+      ) {
+        this.updateSessionId(sessionId, generatedSessionId);
+        sessionId = generatedSessionId;
+        isFirstMessageRegen = false; // Only update once
+
+        if (emitSessionCreated) {
+          const sessionCreated = {
+            event: "session_created",
+            data: {
+              type: "session_created",
+              session_id: sessionId,
+              sessionId,
+            },
+          };
+          this.logPspChunk("session", sessionCreated);
+          yield sessionCreated;
+        }
+      }
+
       if (generatedSessionId && !sessionId) {
         sessionId = generatedSessionId;
       }

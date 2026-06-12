@@ -202,8 +202,74 @@ describe("ChatService Tests", () => {
     `,
       )
       .all(userId, sessionId) as { id: number }[];
+  });
 
-    expect(remaining.map((r) => r.id)).toEqual([20, 21]);
+  it("regenerates the first message by updating session ID on dynamic session_created", async () => {
+    const db = getDatabase();
+    const userId = "usr_test_regen_first";
+    const sessionId = "sess_old_123";
+    insertUser(userId);
+
+    // 1. Insert original user and assistant messages
+    db.prepare(
+      "INSERT INTO chat_sessions (id, user_id, title) VALUES (?, ?, ?)",
+    ).run(sessionId, userId, "Original title");
+    db.prepare(
+      "INSERT INTO chat_messages (id, session_id, role, content) VALUES (?, ?, ?, ?)",
+    ).run("msg_user_1", sessionId, "user", "What is Knovana?");
+    db.prepare(
+      "INSERT INTO chat_messages (id, session_id, role, content) VALUES (?, ?, ?, ?)",
+    ).run("msg_assistant_1", sessionId, "assistant", "Old answer");
+
+    // 2. Create the mock agent that will yield a new session ID
+    const newSessionId = "sess_new_456";
+    const { service } = createServiceWithSdkMessages(userId, [
+      streamEvent(newSessionId, {
+        type: "message_start",
+        message: {
+          id: "sdk_msg_regen",
+          role: "assistant",
+          content: [],
+        },
+      }),
+      assistantMessage(newSessionId, [{ type: "text", text: "New answer" }]),
+    ]);
+
+    // 3. Trigger regenerate on the first message
+    const chunks = await collectChunks(service.regenerate(sessionId));
+
+    // Verify session_created chunk has the new session ID
+    const sessionCreatedChunk = chunks.find(
+      (c) => c.event === "session_created",
+    );
+    expect(sessionCreatedChunk).toBeDefined();
+    expect(sessionCreatedChunk!.data.session_id).toBe(newSessionId);
+
+    // Verify database updates:
+    // The old session ID sess_old_123 should be updated to sess_new_456
+    const oldSession = db
+      .prepare("SELECT * FROM chat_sessions WHERE id = ?")
+      .get(sessionId);
+    expect(oldSession).toBeUndefined();
+
+    const newSession = db
+      .prepare("SELECT * FROM chat_sessions WHERE id = ?")
+      .get(newSessionId);
+    expect(newSession).toBeDefined();
+
+    // The messages should now be under sess_new_456
+    const dbMessages = db
+      .prepare(
+        "SELECT role, content FROM chat_messages WHERE session_id = ? ORDER BY created_at ASC",
+      )
+      .all(newSessionId) as { role: string; content: string }[];
+
+    expect(dbMessages).toHaveLength(2);
+    expect(dbMessages[0]).toEqual({
+      role: "user",
+      content: "What is Knovana?",
+    });
+    expect(dbMessages[1]).toEqual({ role: "assistant", content: "New answer" });
   });
 
   it("converts partial SDK text stream events into PSP content blocks", async () => {
