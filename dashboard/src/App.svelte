@@ -3,7 +3,9 @@
   import { request, getToken, removeToken, getBaseUrl } from "./lib/api";
   import Login from "./components/Login.svelte";
   import Sidebar from "./components/Sidebar.svelte";
-  import Knowledge from "./components/Knowledge.svelte";
+  import KnowledgeList from "./components/KnowledgeList.svelte";
+  import KnowledgeView from "./components/KnowledgeView.svelte";
+  import KnowledgeEdit from "./components/KnowledgeEdit.svelte";
   import Keys from "./components/Keys.svelte";
   import Users from "./components/Users.svelte";
   import ChatWidget from "./components/ChatWidget.svelte";
@@ -15,12 +17,30 @@
   let status = $state("inactive");
   let isAdmin = $state(false);
   
+  const currentRoute = $derived(() => {
+    const path = router.currentPath;
+    if (path.startsWith("/dashboard/keys")) {
+      return { view: "keys", id: null };
+    }
+    if (path.startsWith("/dashboard/users")) {
+      return { view: "users", id: null };
+    }
+
+    const viewMatch = path.match(/^\/dashboard\/knowledge\/view\/(.+)$/);
+    if (viewMatch) {
+      return { view: "knowledge-view", id: decodeURIComponent(viewMatch[1]) };
+    }
+
+    const editMatch = path.match(/^\/dashboard\/knowledge\/edit\/(.+)$/);
+    if (editMatch) {
+      return { view: "knowledge-edit", id: decodeURIComponent(editMatch[1]) };
+    }
+
+    return { view: "knowledge-list", id: null };
+  });
+  
   let activeTab = $derived(
-    router.currentPath.startsWith("/dashboard/keys")
-      ? "keys"
-      : router.currentPath.startsWith("/dashboard/users")
-        ? "users"
-        : "knowledge"
+    currentRoute().view.startsWith("knowledge") ? "knowledge" : currentRoute().view
   );
   let isSidebarCollapsed = $state(false);
 
@@ -103,17 +123,23 @@
 
     <!-- Main Content Panel -->
     <main class="content-pane">
-      {#if activeTab === 'knowledge'}
-        <Knowledge isBlocked={status !== 'active' && !isAdmin} />
-      {:else if activeTab === 'keys'}
-        <Keys {isAdmin} isBlocked={status !== 'active' && !isAdmin} />
-      {:else if activeTab === 'users' && isAdmin}
-        <Users currentAdminUsername={username} />
+      {#if currentRoute().view === 'knowledge-list'}
+        <KnowledgeList isBlocked={status !== 'active' && !isAdmin} />
       {:else}
-        <div class="unauthorized-state">
-          <h3>🚫 访问受限</h3>
-          <p>您无权查看此页面，或者页面不存在。</p>
-        </div>
+        {#if currentRoute().view === 'knowledge-view'}
+          <KnowledgeView id={currentRoute().id || ''} isBlocked={status !== 'active' && !isAdmin} />
+        {:else if currentRoute().view === 'knowledge-edit'}
+          <KnowledgeEdit id={currentRoute().id || ''} isBlocked={status !== 'active' && !isAdmin} />
+        {:else if currentRoute().view === 'keys'}
+          <Keys {isAdmin} isBlocked={status !== 'active' && !isAdmin} />
+        {:else if currentRoute().view === 'users' && isAdmin}
+          <Users currentAdminUsername={username} />
+        {:else}
+          <div class="unauthorized-state">
+            <h3>🚫 访问受限</h3>
+            <p>您无权查看此页面，或者页面不存在。</p>
+          </div>
+        {/if}
       {/if}
     </main>
   </div>
