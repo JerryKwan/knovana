@@ -287,8 +287,11 @@
     show: false,
     x: 0,
     y: 0,
-    line: 1
+    line: 1,
+    view: "main" as "main" | "attachments"
   });
+
+  let rightClickFileInput = $state<HTMLInputElement | null>(null);
 
   function closeContextMenu() {
     if (contextMenu.show) {
@@ -325,8 +328,8 @@
 
     let x = event.clientX;
     let y = event.clientY;
-    const menuWidth = 160;
-    const menuHeight = 38;
+    const menuWidth = 180;
+    const menuHeight = 76;
     if (x + menuWidth > window.innerWidth) {
       x = window.innerWidth - menuWidth - 10;
     }
@@ -338,8 +341,62 @@
       show: true,
       x,
       y,
-      line: clickedLine
+      line: clickedLine,
+      view: "main"
     };
+  }
+
+  function triggerRightClickUpload(e: Event) {
+    e.stopPropagation();
+    if (rightClickFileInput) {
+      rightClickFileInput.click();
+    }
+  }
+
+  async function handleRightClickUploadFile(event: Event) {
+    const input = event.target as HTMLInputElement;
+    if (!input.files || input.files.length === 0) return;
+    const file = input.files[0];
+    
+    contextMenu.show = false;
+    uploadingAttachment = true;
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const token = getToken();
+      const headers = new Headers();
+      if (token) {
+        headers.set("Authorization", `Bearer ${token}`);
+      }
+
+      const res = await fetch(getApiUrl("/api/v1/attachments"), {
+        method: "POST",
+        headers,
+        body: formData,
+      });
+
+      if (!res.ok) {
+        throw new Error(`Upload failed with status ${res.status}`);
+      }
+
+      const result = await res.json();
+      if (result.filename) {
+        const newAtt = {
+          name: result.filename,
+          size: result.size,
+          mime_type: result.mime_type,
+          description: "",
+        };
+        editAttachments = [...editAttachments, newAtt];
+        insertAttachment(newAtt);
+      }
+    } catch (err: any) {
+      alert(`上传并插入附件失败: ${err.message}`);
+    } finally {
+      uploadingAttachment = false;
+      input.value = "";
+    }
   }
 
   function initEditor() {
@@ -658,6 +715,12 @@
         </div>
       </div>
 
+      {#if !isSidebarCollapsed}
+        <!-- svelte-ignore a11y_click_events_have_key_events -->
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div class="sidebar-backdrop" onclick={() => isSidebarCollapsed = true}></div>
+      {/if}
+
       <!-- Collapsible properties sidebar (Metadata, tags & attachments upload) -->
       <aside class="editor-props-sidebar" class:collapsed={isSidebarCollapsed}>
         <!-- Tabs Header -->
@@ -888,11 +951,48 @@
       style="position: fixed; top: {contextMenu.y}px; left: {contextMenu.x}px; z-index: 10000;"
       onclick={(e) => e.stopPropagation()}
     >
-      <button class="context-menu-item" onclick={() => { syncPreviewToLine(contextMenu.line); contextMenu.show = false; }}>
-        聚焦渲染视区
-      </button>
+      {#if contextMenu.view === 'main'}
+        <button class="context-menu-item" onclick={() => { syncPreviewToLine(contextMenu.line); contextMenu.show = false; }}>
+          聚焦渲染视区
+        </button>
+        <div class="context-menu-divider"></div>
+        <button class="context-menu-item" onclick={(e) => { contextMenu.view = 'attachments'; e.stopPropagation(); }}>
+          📎 插入附件...
+        </button>
+      {:else if contextMenu.view === 'attachments'}
+        <button class="context-menu-item back-item" onclick={(e) => { contextMenu.view = 'main'; e.stopPropagation(); }}>
+          ⬅️ 返回主菜单
+        </button>
+        <button class="context-menu-item upload-item" onclick={triggerRightClickUpload}>
+          ➕ 上传新文件...
+        </button>
+        
+        {#if editAttachments.length > 0}
+          <div class="context-menu-divider"></div>
+          <div class="submenu-header">已有附件：</div>
+          <div class="submenu-scroll-area">
+            {#each editAttachments as att}
+              <button 
+                class="context-menu-item attachment-item" 
+                onclick={() => { insertAttachment(att); contextMenu.show = false; }}
+                title="插入 {att.name}"
+              >
+                <span class="attachment-name-text">{att.name}</span>
+              </button>
+            {/each}
+          </div>
+        {/if}
+      {/if}
     </div>
   {/if}
+
+  <input 
+    type="file" 
+    bind:this={rightClickFileInput} 
+    class="hidden" 
+    onchange={handleRightClickUploadFile} 
+    style="display: none;"
+  />
 </div>
 
 <style>
@@ -1036,6 +1136,18 @@
     flex: 1;
     display: flex;
     overflow: hidden;
+    position: relative;
+  }
+
+  /* Sidebar absolute overlay backdrop click-catcher */
+  .sidebar-backdrop {
+    position: absolute;
+    left: 0;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 40;
+    background: transparent;
   }
 
   .editor-main-workspace {
@@ -1097,26 +1209,33 @@
     height: 100%;
   }
 
-  /* Properties Sidebar */
+  /* Properties Sidebar - Overlay Drawer design */
   .editor-props-sidebar {
-    width: 300px;
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: 320px;
+    background: color-mix(in srgb, var(--bg-card) 90%, transparent);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
     border-left: 1px solid var(--border-fine);
-    background: var(--bg-card);
     padding: 24px;
     overflow-y: auto;
     display: flex;
     flex-direction: column;
     gap: 16px;
-    flex-shrink: 0;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    z-index: 50;
+    box-shadow: -8px 0 32px rgba(0, 0, 0, 0.06);
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), visibility 0.3s;
     box-sizing: border-box;
+    visibility: visible;
   }
 
   .editor-props-sidebar.collapsed {
-    width: 0;
-    padding: 0;
-    border-left: none;
-    overflow: hidden;
+    transform: translateX(100%);
+    visibility: hidden;
+    box-shadow: none;
   }
 
   /* Tabs Layout */
@@ -1469,7 +1588,8 @@
     border: 1px solid var(--border-fine);
     border-radius: 6px;
     box-shadow: 0 10px 20px -5px rgba(0, 0, 0, 0.08), 0 4px 6px -2px rgba(0, 0, 0, 0.04);
-    min-width: 150px;
+    min-width: 170px;
+    max-width: 240px;
     padding: 4px;
     display: flex;
     flex-direction: column;
@@ -1480,22 +1600,77 @@
   .context-menu-item {
     display: flex;
     align-items: center;
-    justify-content: center;
+    justify-content: flex-start;
     width: 100%;
     padding: 8px 12px;
     border: none;
     background: transparent;
     cursor: pointer;
-    font-size: 13px;
+    font-size: 12.5px;
     font-weight: 500;
     color: var(--text-ink);
     border-radius: 4px;
     transition: all 0.18s ease;
     font-family: inherit;
+    box-sizing: border-box;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .context-menu-item:hover {
     background: var(--bg-card-hover);
     color: var(--accent-ochre);
+  }
+
+  .context-menu-item.back-item {
+    color: var(--text-muted);
+    border-bottom: 1px solid var(--border-fine);
+    border-radius: 0;
+    padding-bottom: 6px;
+    margin-bottom: 4px;
+  }
+
+  .context-menu-item.upload-item {
+    font-weight: 600;
+    color: var(--accent-ochre);
+  }
+
+  .context-menu-divider {
+    height: 1px;
+    background: var(--border-fine);
+    margin: 4px 0;
+  }
+
+  .submenu-header {
+    font-size: 10.5px;
+    font-weight: 700;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 4px 12px;
+    user-select: none;
+  }
+
+  .submenu-scroll-area {
+    max-height: 140px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .context-menu-item.attachment-item {
+    font-size: 11.5px;
+    padding: 6px 12px;
+    color: var(--text-muted);
+  }
+
+  .attachment-name-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-align: left;
+    width: 100%;
   }
 </style>
