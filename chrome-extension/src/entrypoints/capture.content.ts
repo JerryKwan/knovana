@@ -20,6 +20,8 @@ export default defineContentScript({
           selectionHtml = container.innerHTML;
         }
 
+        const action = message.payload?.action;
+
         const getMeta = (name: string) =>
           document.querySelector<HTMLMetaElement>(`meta[name="${name}"], meta[property="${name}"]`)
             ?.content;
@@ -27,6 +29,21 @@ export default defineContentScript({
         const favicon =
           document.querySelector<HTMLLinkElement>('link[rel~="icon"]')?.href ??
           document.querySelector<HTMLLinkElement>('link[rel="shortcut icon"]')?.href;
+
+        if (action === 'save-media') {
+          sendResponse({
+            pageUrl: window.location.href,
+            pageTitle: document.title,
+            description: getMeta('description') ?? getMeta('og:description') ?? undefined,
+            author: getMeta('author') ?? undefined,
+            siteName: getMeta('og:site_name') ?? undefined,
+            favicon,
+            language: document.documentElement.lang || undefined,
+            selectedHtml: selectionHtml,
+            selectedImages: [],
+          });
+          return;
+        }
 
         // Perform extraction asynchronously and respond
         extractContent(url, document, selectionHtml)
