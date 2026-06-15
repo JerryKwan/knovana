@@ -326,6 +326,9 @@
       lineHeight: "1.7",
       caretColor: "var(--text-ink)",
     },
+    ".cm-cursor, .cm-dropCursor": {
+      borderLeft: "1.5px solid var(--text-ink)",
+    },
     ".cm-line": {
       padding: "0",
     },
@@ -693,6 +696,29 @@
     return attName.split('.').pop()?.toUpperCase() || 'FILE';
   }
 
+  function getFileIconSvg(name: string): string {
+    const ext = name.split('.').pop()?.toLowerCase() || '';
+    if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(ext)) {
+      return `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-image"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>`;
+    }
+    if (['mp3', 'wav', 'ogg', 'm4a', 'flac'].includes(ext)) {
+      return `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-music"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>`;
+    }
+    if (['mp4', 'webm', 'mkv', 'avi', 'mov'].includes(ext)) {
+      return `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-video"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2" ry="2"/></svg>`;
+    }
+    if (['pdf', 'epub'].includes(ext)) {
+      return `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-file-text"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><path d="M9 15h6"/><path d="M9 12h6"/><path d="M9 9h1"/></svg>`;
+    }
+    if (['zip', 'rar', '7z', 'tar', 'gz'].includes(ext)) {
+      return `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-archive"><path d="M21 8v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8"/><rect width="22" height="5" x="1" y="3" rx="1"/><path d="M10 12h4"/></svg>`;
+    }
+    if (['txt', 'md', 'json', 'js', 'ts', 'html', 'css'].includes(ext)) {
+      return `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-file-code"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><line x1="10" y1="9" x2="8" y2="9"/></svg>`;
+    }
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-file"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>`;
+  }
+
   onMount(async () => {
     await loadEntry();
     await loadExistingCategories();
@@ -1031,7 +1057,7 @@
                   <div class="attachment-item-row">
                     <div class="att-left">
                       <span class="att-file-icon">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
+                        {@html getFileIconSvg(att.name)}
                       </span>
                       <div class="att-info">
                         <span class="att-name-text" title={att.name}>{att.name}</span>
@@ -1833,30 +1859,29 @@
   .edit-attachments-list {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 4px;
   }
 
   .attachment-item-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 8px 10px;
-    background: var(--bg-paper);
-    border: 1px solid var(--border-fine);
+    padding: 6px 8px;
+    background: transparent;
+    border: 1px solid transparent;
     border-radius: 6px;
-    gap: 12px;
-    transition: all 0.2s ease;
+    gap: 10px;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
   }
 
   .attachment-item-row:hover {
     background: var(--bg-card-hover);
-    border-color: var(--text-muted);
   }
 
   .att-left {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
     min-width: 0;
     flex: 1;
   }
@@ -1867,6 +1892,16 @@
     justify-content: center;
     color: var(--text-muted);
     flex-shrink: 0;
+    width: 24px;
+    height: 24px;
+    border-radius: 4px;
+    background: var(--bg-card);
+    transition: background-color 0.15s ease, color 0.15s ease;
+  }
+
+  .attachment-item-row:hover .att-file-icon {
+    background: var(--bg-paper);
+    color: var(--text-ink);
   }
 
   .att-info {
@@ -1877,7 +1912,7 @@
   }
 
   .att-name-text {
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 500;
     color: var(--text-ink);
     white-space: nowrap;
@@ -1887,29 +1922,37 @@
   }
 
   .att-size-text {
-    font-size: 10px;
+    font-size: 10.5px;
     color: var(--text-muted);
     line-height: 1.2;
+    margin-top: 1px;
   }
 
   .att-actions-group {
     display: flex;
-    gap: 6px;
+    gap: 4px;
     flex-shrink: 0;
+    opacity: 0.4;
+    transition: opacity 0.15s ease;
+  }
+
+  .attachment-item-row:hover .att-actions-group,
+  .attachment-item-row:focus-within .att-actions-group {
+    opacity: 1;
   }
 
   .att-action-btn-circle {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 26px;
-    height: 26px;
+    width: 28px;
+    height: 28px;
     border-radius: 50%;
-    border: 1px solid var(--border-fine);
-    background: var(--bg-paper);
+    border: none;
+    background: transparent;
     color: var(--text-muted);
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: background-color 0.15s ease, color 0.15s ease;
   }
 
   .att-action-btn-circle svg {
@@ -1918,18 +1961,17 @@
 
   .att-action-btn-circle:hover {
     color: var(--text-ink);
-    background: var(--bg-card-hover);
+    background: var(--bg-card);
   }
 
   .att-action-btn-circle.insert-btn:hover {
-    border-color: var(--accent-ochre);
+    background: rgba(178, 90, 56, 0.08);
     color: var(--accent-ochre);
   }
 
   .att-action-btn-circle.delete-btn:hover {
-    border-color: var(--accent-terracotta);
+    background: rgba(160, 71, 36, 0.08);
     color: var(--accent-terracotta);
-    background: rgba(197, 48, 48, 0.04);
   }
 
   .new-topic-input-wrapper {
