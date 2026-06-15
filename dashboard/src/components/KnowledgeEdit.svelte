@@ -731,14 +731,16 @@
             class="sidebar-tab-btn {activeSidebarTab === 'properties' ? 'active' : ''}" 
             onclick={() => activeSidebarTab = 'properties'}
           >
-            📝 属性
+            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
+            属性
           </button>
           <button 
             type="button"
             class="sidebar-tab-btn {activeSidebarTab === 'attachments' ? 'active' : ''}" 
             onclick={() => activeSidebarTab = 'attachments'}
           >
-            📎 附件 ({editAttachments.length})
+            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+            附件 ({editAttachments.length})
           </button>
         </div>
 
@@ -748,7 +750,7 @@
             <!-- Title -->
             <div class="property-row block-row">
               <div class="property-label">
-                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15h16"/><path d="M4 6h16"/><path d="M12 2v20"/></svg>
+                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><line x1="10" y1="9" x2="8" y2="9"/></svg>
                 文档标题
               </div>
               <div class="property-value">
@@ -769,7 +771,7 @@
             <!-- Storage Name (Filename) -->
             <div class="property-row block-row">
               <div class="property-label">
-                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
+                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
                 存储文件名
               </div>
               <div class="property-value">
@@ -779,34 +781,42 @@
                   bind:value={editStorageName} 
                   placeholder="请输入存储文件名..." 
                 />
-                <span class="property-info-tip">⚠️ 更改存储名字会物理重命名，其它双链引用将失效</span>
+                <div class="property-warning-box">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="warning-icon"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                  <span class="property-warning-text">更改存储名字会物理重命名，其它条目的双链引用可能会失效。</span>
+                </div>
               </div>
             </div>
 
             <!-- Category selection -->
             <div class="property-row block-row">
               <div class="property-label">
-                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/><path d="M2 10h20"/></svg>
                 归档位置
               </div>
               <div class="property-value">
-                <select class="property-select" bind:value={currentCategory} onchange={() => {
-                  if (currentCategory === '__new_topic__') {
-                    isAddingNewTopic = true;
-                  } else {
-                    isAddingNewTopic = false;
-                  }
-                }}>
-                  <option value="inbox">📥 收集箱 (inbox)</option>
-                  <option value="daily">📝 随笔日记 (daily)</option>
-                  {#if existingCategories.length > 0}
-                    <option disabled>────── 专题类别 ──────</option>
-                    {#each existingCategories as cat}
-                      <option value={cat}>📚 {cat.replace('topics/', '')}</option>
-                    {/each}
-                  {/if}
-                  <option value="__new_topic__">➕ 新建专题...</option>
-                </select>
+                <div class="custom-select-wrapper">
+                  <select class="property-select" bind:value={currentCategory} onchange={() => {
+                    if (currentCategory === '__new_topic__') {
+                      isAddingNewTopic = true;
+                    } else {
+                      isAddingNewTopic = false;
+                    }
+                  }}>
+                    <option value="inbox">收集箱 (inbox)</option>
+                    <option value="daily">随笔日记 (daily)</option>
+                    {#if existingCategories.length > 0}
+                      <option disabled>────── 专题类别 ──────</option>
+                      {#each existingCategories as cat}
+                        <option value={cat}>{cat.replace('topics/', '')}</option>
+                      {/each}
+                    {/if}
+                    <option value="__new_topic__">+ 新建专题...</option>
+                  </select>
+                  <span class="select-arrow">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+                  </span>
+                </div>
                 
                 {#if isAddingNewTopic}
                   <div class="new-topic-input-wrapper">
@@ -842,23 +852,36 @@
             <!-- Source URL -->
             <div class="property-row block-row">
               <div class="property-label">
-                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
                 来源 URL
               </div>
               <div class="property-value">
-                <input 
-                  type="text" 
-                  class="property-input" 
-                  bind:value={editSourceUrl} 
-                  placeholder="无来源 URL" 
-                />
+                <div class="url-input-wrapper">
+                  <input 
+                    type="text" 
+                    class="property-input" 
+                    bind:value={editSourceUrl} 
+                    placeholder="无来源 URL" 
+                  />
+                  {#if editSourceUrl && editSourceUrl.trim()}
+                    <a 
+                      href={editSourceUrl.trim()} 
+                      target="_blank" 
+                      rel="noopener noreferrer" 
+                      class="url-visit-btn"
+                      title="在新标签页中访问来源链接"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                    </a>
+                  {/if}
+                </div>
               </div>
             </div>
 
             <!-- Tags -->
             <div class="property-row block-row">
               <div class="property-label">
-                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
                 条目标签
               </div>
               <div class="property-value tags-value">
@@ -1217,9 +1240,7 @@
     top: 0;
     bottom: 0;
     width: 320px;
-    background: color-mix(in srgb, var(--bg-card) 90%, transparent);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
+    background: var(--bg-card);
     border-left: 1px solid var(--border-fine);
     padding: 24px;
     overflow-y: auto;
@@ -1249,6 +1270,10 @@
 
   .sidebar-tab-btn {
     flex: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
     background: transparent;
     border: none;
     border-bottom: 2px solid transparent;
@@ -1259,6 +1284,11 @@
     cursor: pointer;
     transition: all 0.2s ease;
     font-family: var(--font-sans), sans-serif;
+  }
+
+  .sidebar-tab-btn svg {
+    flex-shrink: 0;
+    color: currentColor;
   }
 
   .sidebar-tab-btn:hover {
@@ -1351,26 +1381,106 @@
     font-size: 12px;
   }
 
-  .property-select {
-    border: 1px solid var(--border-fine);
-    border-radius: 4px;
-    background: var(--bg-paper);
-    color: var(--text-ink);
-    padding: 6px;
-    font-size: 12.5px;
-    width: 100%;
-    outline: none;
-    cursor: pointer;
+  /* Warning Box Design */
+  .property-warning-box {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin-top: 6px;
+    padding: 10px;
+    background: rgba(197, 48, 48, 0.04);
+    border: 1px solid rgba(197, 48, 48, 0.12);
+    border-radius: 6px;
+    line-height: 1.4;
   }
 
-  .property-info-tip {
-    font-size: 9.5px;
+  .property-warning-box .warning-icon {
     color: var(--accent-terracotta);
     margin-top: 2px;
-    display: block;
-    line-height: 1.3;
+    flex-shrink: 0;
   }
 
+  .property-warning-text {
+    font-size: 11px;
+    color: var(--text-ink);
+    font-family: var(--font-sans), sans-serif;
+  }
+
+  /* Custom Category Select wrapper */
+  .custom-select-wrapper {
+    position: relative;
+    width: 100%;
+  }
+
+  .custom-select-wrapper select.property-select {
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    width: 100%;
+    padding: 8px 30px 8px 10px;
+    font-size: 13px;
+    font-family: var(--font-sans), sans-serif;
+    color: var(--text-ink);
+    background: var(--bg-paper);
+    border: 1px solid var(--border-fine);
+    border-radius: 6px;
+    outline: none;
+    cursor: pointer;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  }
+
+  .custom-select-wrapper select.property-select:focus {
+    border-color: var(--accent-ochre);
+    box-shadow: 0 0 0 2px rgba(178, 90, 56, 0.1);
+  }
+
+  .select-arrow {
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    pointer-events: none;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+  }
+
+  /* Source URL input wrapper */
+  .url-input-wrapper {
+    display: flex;
+    align-items: center;
+    border-bottom: 1px solid var(--border-fine);
+    transition: border-color 0.2s ease;
+    width: 100%;
+  }
+
+  .url-input-wrapper:focus-within {
+    border-bottom-color: var(--accent-ochre);
+  }
+
+  .url-input-wrapper .property-input {
+    border-bottom: none;
+    padding-right: 8px;
+  }
+
+  .url-visit-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+    padding: 6px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    flex-shrink: 0;
+  }
+
+  .url-visit-btn:hover {
+    color: var(--accent-ochre);
+    background: var(--bg-card-hover);
+  }
+
+  /* Tags styles */
   .tags-value {
     display: flex;
     flex-direction: column;
@@ -1400,15 +1510,22 @@
   .note-tag-pill {
     display: inline-flex;
     align-items: center;
-    padding: 2px 8px;
-    background: var(--bg-paper);
+    padding: 3px 8px;
+    background: var(--bg-card-hover);
     border: 1px solid var(--border-fine);
-    border-radius: 12px;
-    font-size: 11px;
-    color: var(--text-muted);
-    gap: 4px;
+    border-radius: 4px;
+    font-size: 11.5px;
+    color: var(--text-ink);
+    gap: 6px;
     font-family: var(--font-sans), sans-serif;
     font-weight: 500;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .note-tag-pill:hover {
+    background: var(--bg-card);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.04);
+    border-color: var(--text-muted);
   }
 
   .remove-tag-btn {
@@ -1416,18 +1533,22 @@
     background: transparent;
     color: var(--text-muted);
     cursor: pointer;
-    font-weight: 700;
-    font-size: 12px;
+    font-weight: 500;
+    font-size: 14px;
     display: flex;
     align-items: center;
     justify-content: center;
     padding: 0;
-    width: 12px;
-    height: 12px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    transition: all 0.2s ease;
   }
 
   .remove-tag-btn:hover {
-    color: #ef4444;
+    color: var(--accent-terracotta);
+    background: rgba(197, 48, 48, 0.08);
+    transform: scale(1.15);
   }
 
   /* File drag uploader */
