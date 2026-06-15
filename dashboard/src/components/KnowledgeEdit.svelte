@@ -663,7 +663,8 @@
       </div>
 
       <button 
-        class="props-toggle-btn {isSidebarCollapsed ? 'collapsed' : ''}" 
+        class="props-toggle-btn" 
+        class:active={!isSidebarCollapsed}
         onclick={() => isSidebarCollapsed = !isSidebarCollapsed}
         title={isSidebarCollapsed ? "展开属性面板" : "收起属性面板"}
       >
@@ -1093,7 +1094,7 @@
     color: var(--text-ink);
   }
 
-  .props-toggle-btn.collapsed {
+  .props-toggle-btn.active {
     color: var(--accent-ochre);
     border-color: var(--accent-ochre);
     background: var(--bg-card-hover);
