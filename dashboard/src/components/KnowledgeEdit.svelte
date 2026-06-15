@@ -324,7 +324,7 @@
     ".cm-content": {
       padding: "0",
       lineHeight: "1.7",
-      caretColor: "var(--accent-ochre)",
+      caretColor: "var(--text-ink)",
     },
     ".cm-line": {
       padding: "0",
@@ -1028,22 +1028,32 @@
             {:else}
               <div class="edit-attachments-list">
                 {#each editAttachments as att}
-                  <div class="attachment-item-card">
-                    <div class="att-icon-wrapper">
-                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
+                  <div class="attachment-item-row">
+                    <div class="att-left">
+                      <span class="att-file-icon">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
+                      </span>
+                      <div class="att-info">
+                        <span class="att-name-text" title={att.name}>{att.name}</span>
+                        <span class="att-size-text">{formatBytes(att.size)}</span>
+                      </div>
                     </div>
-                    <div class="att-meta">
-                      <span class="att-name" title={att.name}>{att.name}</span>
-                      <span class="att-size">{formatBytes(att.size)}</span>
-                    </div>
-                    <div class="att-actions">
-                      <button class="att-action-icon-btn insert" onclick={() => insertAttachment(att)} title="插入 Markdown 引用至光标处">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
-                        插入
+                    <div class="att-actions-group">
+                      <button 
+                        type="button" 
+                        class="att-action-btn-circle insert-btn" 
+                        onclick={() => insertAttachment(att)} 
+                        title="插入引用到光标处"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
                       </button>
-                      <button class="att-action-icon-btn delete" onclick={() => removeAttachment(att.name)} title="删除附件">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
-                        删除
+                      <button 
+                        type="button" 
+                        class="att-action-btn-circle delete-btn" 
+                        onclick={() => removeAttachment(att.name)} 
+                        title="删除此附件"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
                       </button>
                     </div>
                   </div>
@@ -1125,6 +1135,11 @@
     background-color: var(--accent-ochre);
   }
 
+  @keyframes unfocused-cm-blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0; }
+  }
+
   /* Keep cursor selection highlight visible when editor is unfocused */
   .codemirror-editor-container :global(.cm-selectionBackground) {
     background: rgba(178, 90, 56, 0.15) !important;
@@ -1136,11 +1151,12 @@
   .codemirror-editor-container :global(.cm-editor:not(.cm-focused) .cm-cursorLayer) {
     display: block !important;
     visibility: visible !important;
+    animation: unfocused-cm-blink 1.2s steps(1) infinite;
   }
   .codemirror-editor-container :global(.cm-editor:not(.cm-focused) .cm-cursor) {
     display: block !important;
     visibility: visible !important;
-    border-left: 2px solid var(--accent-ochre) !important;
+    border-left: 1.5px solid var(--text-ink) !important;
   }
 
   .kb-editor-container {
@@ -1820,103 +1836,97 @@
     gap: 8px;
   }
 
-  .attachment-item-card {
+  .attachment-item-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 10px;
     background: var(--bg-paper);
     border: 1px solid var(--border-fine);
     border-radius: 6px;
-    padding: 10px;
-    display: grid;
-    grid-template-columns: auto 1fr;
+    gap: 12px;
+    transition: all 0.2s ease;
+  }
+
+  .attachment-item-row:hover {
+    background: var(--bg-card-hover);
+    border-color: var(--text-muted);
+  }
+
+  .att-left {
+    display: flex;
     align-items: center;
     gap: 8px;
     min-width: 0;
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    flex: 1;
   }
 
-  .attachment-item-card:hover {
-    border-color: var(--text-muted);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
-  }
-
-  .att-icon-wrapper {
-    display: flex;
+  .att-file-icon {
+    display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 28px;
-    height: 28px;
-    background: var(--bg-card);
-    border: 1px solid var(--border-fine);
-    border-radius: 4px;
     color: var(--text-muted);
     flex-shrink: 0;
   }
 
-  .att-meta {
+  .att-info {
     display: flex;
     flex-direction: column;
     min-width: 0;
+    text-align: left;
   }
 
-  .att-name {
+  .att-name-text {
     font-size: 12px;
-    font-weight: 600;
+    font-weight: 500;
     color: var(--text-ink);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    text-align: left;
     line-height: 1.3;
   }
 
-  .att-size {
-    font-size: 10.5px;
+  .att-size-text {
+    font-size: 10px;
     color: var(--text-muted);
-    text-align: left;
     line-height: 1.2;
   }
 
-  .att-actions {
-    grid-column: 1 / span 2;
+  .att-actions-group {
     display: flex;
     gap: 6px;
-    width: 100%;
-    margin-top: 4px;
+    flex-shrink: 0;
   }
 
-  .att-action-icon-btn {
-    flex: 1;
+  .att-action-btn-circle {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 6px;
-    padding: 6px 10px;
-    font-size: 11.5px;
-    font-weight: 600;
-    border-radius: 6px;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
     border: 1px solid var(--border-fine);
     background: var(--bg-paper);
     color: var(--text-muted);
     cursor: pointer;
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-    font-family: var(--font-sans), sans-serif;
+    transition: all 0.2s ease;
   }
 
-  .att-action-icon-btn svg {
+  .att-action-btn-circle svg {
     flex-shrink: 0;
   }
 
-  .att-action-icon-btn:hover {
-    background: var(--bg-card-hover);
+  .att-action-btn-circle:hover {
     color: var(--text-ink);
+    background: var(--bg-card-hover);
   }
 
-  .att-action-icon-btn.insert:hover {
+  .att-action-btn-circle.insert-btn:hover {
     border-color: var(--accent-ochre);
     color: var(--accent-ochre);
-    background: var(--bg-card-hover);
   }
 
-  .att-action-icon-btn.delete:hover {
+  .att-action-btn-circle.delete-btn:hover {
     border-color: var(--accent-terracotta);
     color: var(--accent-terracotta);
     background: rgba(197, 48, 48, 0.04);
