@@ -138,6 +138,7 @@ export class KnowledgeService {
         const sourceFilename =
           extractAttachmentFilename(`attachments/${att.name}`) || att.name;
         const sourcePath = join(globalAttachmentsDir, sourceFilename);
+        let finalName = att.name;
 
         if (existsSync(sourcePath)) {
           if (!assetsDirCreated) {
@@ -150,28 +151,25 @@ export class KnowledgeService {
             assetsDir,
             sourceFilename,
           );
-          const finalName = moved.filename;
-
-          // Replace attachment reference in Markdown text
-          const finalAssetRef = `assets/${finalName}`;
-          const refs = new Set([
-            `attachments/${att.name}`,
-            `attachments/${sourceFilename}`,
-            `attachments/${encodeURIComponent(att.name)}`,
-            `attachments/${encodeURIComponent(sourceFilename)}`,
-          ]);
-          for (const ref of refs) {
-            entryContent = entryContent.replaceAll(ref, finalAssetRef);
-          }
-
-          finalProcessed.push({
-            ...att,
-            name: finalName,
-          });
-        } else {
-          // If the file is already migrated or doesn't exist in global attachments, keep it as is
-          finalProcessed.push(att);
+          finalName = moved.filename;
         }
+
+        // Replace attachment reference in Markdown text
+        const finalAssetRef = `assets/${finalName}`;
+        const refs = new Set([
+          `attachments/${att.name}`,
+          `attachments/${sourceFilename}`,
+          `attachments/${encodeURIComponent(att.name)}`,
+          `attachments/${encodeURIComponent(sourceFilename)}`,
+        ]);
+        for (const ref of refs) {
+          entryContent = entryContent.replaceAll(ref, finalAssetRef);
+        }
+
+        finalProcessed.push({
+          ...att,
+          name: finalName,
+        });
       }
       processedAttachments = finalProcessed;
     }

@@ -504,12 +504,14 @@
   // Insert attachment Markdown code
   function insertAttachment(att: Attachment) {
     if (!editorViewInstance) return;
+    const isExisting = selectedEntry?.attachments?.some(a => a.name === att.name) ?? false;
+    const prefix = isExisting ? "assets" : "attachments";
     const isImg = ["png", "jpg", "jpeg", "gif", "webp", "svg"].includes(
       att.name.split(".").pop()?.toLowerCase() || ""
     );
     const refText = isImg
-      ? `![${att.name}](attachments/${att.name})`
-      : `[${att.name}](attachments/${att.name})`;
+      ? `![${att.name}](${prefix}/${att.name})`
+      : `[${att.name}](${prefix}/${att.name})`;
 
     const state = editorViewInstance.state;
     const ranges = state.selection.ranges;
@@ -682,7 +684,13 @@
     // 2. Rewrite temporary attachments path
     const tempRegex = /src=["']attachments\/([^"']+)["']/g;
     resolvedHtml = resolvedHtml.replace(tempRegex, (match, filename) => {
-      let serveUrl = getApiUrl(`/api/v1/attachments/file/${filename}`);
+      const isExisting = selectedEntry?.attachments?.some(a => a.name === filename) ?? false;
+      let serveUrl = "";
+      if (isExisting) {
+        serveUrl = getApiUrl(`/api/v1/attachments/notes/${noteDir}/assets/${filename}`);
+      } else {
+        serveUrl = getApiUrl(`/api/v1/attachments/file/${filename}`);
+      }
       if (token) {
         serveUrl += `?token=${encodeURIComponent(token)}`;
       }
@@ -827,16 +835,13 @@
         </div>
       </div>
 
-      {#if !isSidebarCollapsed}
-        <!-- svelte-ignore a11y_click_events_have_key_events -->
-        <!-- svelte-ignore a11y_no_static_element_interactions -->
-        <div class="sidebar-backdrop" onclick={() => isSidebarCollapsed = true}></div>
-      {/if}
+
 
       <!-- Collapsible properties sidebar (Metadata, tags & attachments upload) -->
       <aside 
         class="editor-props-sidebar" 
         class:collapsed={isSidebarCollapsed}
+        class:resizing={isResizing}
         style="width: {sidebarWidth}px;"
       >
         <!-- Resize handle -->
@@ -1361,16 +1366,7 @@
     position: relative;
   }
 
-  /* Sidebar absolute overlay backdrop click-catcher */
-  .sidebar-backdrop {
-    position: absolute;
-    left: 0;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    z-index: 40;
-    background: transparent;
-  }
+
 
   .editor-main-workspace {
     flex: 1;
@@ -1431,12 +1427,9 @@
     height: 100%;
   }
 
-  /* Properties Sidebar - Overlay Drawer design */
+  /* Properties Sidebar - Docked Panel design */
   .editor-props-sidebar {
-    position: absolute;
-    right: 0;
-    top: 0;
-    bottom: 0;
+    position: relative;
     width: 320px;
     background: var(--bg-card);
     border-left: 1px solid var(--border-fine);
@@ -1447,15 +1440,21 @@
     gap: 16px;
     z-index: 50;
     box-shadow: -8px 0 32px rgba(0, 0, 0, 0.06);
-    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), visibility 0.3s;
+    transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1), padding 0.3s ease, border-left-width 0.3s ease;
     box-sizing: border-box;
-    visibility: visible;
+    flex-shrink: 0;
   }
 
   .editor-props-sidebar.collapsed {
-    transform: translateX(100%);
-    visibility: hidden;
+    width: 0 !important;
+    padding: 0 !important;
+    border-left-width: 0 !important;
+    overflow: hidden;
     box-shadow: none;
+  }
+
+  .editor-props-sidebar.resizing {
+    transition: none !important;
   }
 
   /* Tabs Layout */
