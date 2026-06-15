@@ -51,9 +51,14 @@
   
   // Category states
   let currentCategory = $state("inbox");
+  let previousCategory = $state("inbox");
   let newTopicName = $state("");
   let isAddingNewTopic = $state(false);
   let existingCategories = $state<string[]>([]);
+  
+  // DOM element bindings for auto-growing inputs
+  let titleTextareaRef = $state<HTMLTextAreaElement | null>(null);
+  let urlTextareaRef = $state<HTMLTextAreaElement | null>(null);
   
   // Sidebar states
   let isSidebarCollapsed = $state(false);
@@ -104,10 +109,47 @@
         } else {
           currentCategory = "inbox";
         }
+        previousCategory = currentCategory;
       }
     } finally {
       loadingDetail = false;
     }
+  }
+
+  $effect(() => {
+    if (titleTextareaRef && editTitle !== undefined) {
+      titleTextareaRef.style.height = "auto";
+      titleTextareaRef.style.height = titleTextareaRef.scrollHeight + "px";
+    }
+  });
+
+  $effect(() => {
+    if (urlTextareaRef && editSourceUrl !== undefined) {
+      urlTextareaRef.style.height = "auto";
+      urlTextareaRef.style.height = urlTextareaRef.scrollHeight + "px";
+    }
+  });
+
+  function confirmNewTopic() {
+    const cleaned = newTopicName.trim().toLowerCase().replace(/[^a-z0-9-_]/g, "");
+    if (cleaned) {
+      const catVal = `topics/${cleaned}`;
+      if (!existingCategories.includes(catVal)) {
+        existingCategories = [...existingCategories, catVal];
+      }
+      currentCategory = catVal;
+      previousCategory = catVal;
+    } else {
+      currentCategory = previousCategory;
+    }
+    isAddingNewTopic = false;
+    newTopicName = "";
+  }
+
+  function cancelNewTopic() {
+    currentCategory = previousCategory;
+    isAddingNewTopic = false;
+    newTopicName = "";
   }
 
   // Load existing categories to display in dropdown
@@ -757,6 +799,7 @@
                 <textarea 
                   class="property-textarea" 
                   bind:value={editTitle} 
+                  bind:this={titleTextareaRef}
                   placeholder="无标题"
                   rows="1"
                   oninput={(e) => {
@@ -795,55 +838,55 @@
                 归档位置
               </div>
               <div class="property-value">
-                <div class="custom-select-wrapper">
-                  <select class="property-select" bind:value={currentCategory} onchange={() => {
-                    if (currentCategory === '__new_topic__') {
-                      isAddingNewTopic = true;
-                    } else {
-                      isAddingNewTopic = false;
-                    }
-                  }}>
-                    <option value="inbox">收集箱 (inbox)</option>
-                    <option value="daily">随笔日记 (daily)</option>
-                    {#if existingCategories.length > 0}
-                      <option disabled>────── 专题类别 ──────</option>
-                      {#each existingCategories as cat}
-                        <option value={cat}>{cat.replace('topics/', '')}</option>
-                      {/each}
-                    {/if}
-                    <option value="__new_topic__">+ 新建专题...</option>
-                  </select>
-                  <span class="select-arrow">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
-                  </span>
-                </div>
-                
                 {#if isAddingNewTopic}
-                  <div class="new-topic-input-wrapper">
+                  <div class="new-topic-inline-wrapper">
                     <input 
                       type="text" 
-                      class="property-input" 
+                      class="property-input new-topic-input" 
                       placeholder="输入新专题标识 (如 ai)..." 
                       bind:value={newTopicName}
-                      onblur={() => {
-                        const cleaned = newTopicName.trim().toLowerCase().replace(/[^a-z0-9-_]/g, "");
-                        if (cleaned) {
-                          const catVal = `topics/${cleaned}`;
-                          if (!existingCategories.includes(catVal)) {
-                            existingCategories = [...existingCategories, catVal];
-                          }
-                          currentCategory = catVal;
-                        }
-                        isAddingNewTopic = false;
-                        newTopicName = "";
-                      }}
+                      autofocus
                       onkeydown={(e) => {
                         if (e.key === 'Enter') {
                           e.preventDefault();
-                          (e.target as HTMLInputElement).blur();
+                          confirmNewTopic();
+                        } else if (e.key === 'Escape') {
+                          e.preventDefault();
+                          cancelNewTopic();
                         }
                       }}
                     />
+                    <div class="new-topic-actions">
+                      <button type="button" class="inline-action-btn confirm" onclick={confirmNewTopic} title="确认创建并归档">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                      </button>
+                      <button type="button" class="inline-action-btn cancel" onclick={cancelNewTopic} title="取消创建">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                      </button>
+                    </div>
+                  </div>
+                {:else}
+                  <div class="custom-select-wrapper">
+                    <select class="property-select" bind:value={currentCategory} onchange={() => {
+                      if (currentCategory === '__new_topic__') {
+                        isAddingNewTopic = true;
+                      } else {
+                        previousCategory = currentCategory;
+                      }
+                    }}>
+                      <option value="inbox">收集箱 (inbox)</option>
+                      <option value="daily">随笔日记 (daily)</option>
+                      {#if existingCategories.length > 0}
+                        <option disabled>────── 专题类别 ──────</option>
+                        {#each existingCategories as cat}
+                          <option value={cat}>{cat.replace('topics/', '')}</option>
+                        {/each}
+                      {/if}
+                      <option value="__new_topic__">+ 新建专题...</option>
+                    </select>
+                    <span class="select-arrow">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+                    </span>
                   </div>
                 {/if}
               </div>
@@ -857,12 +900,18 @@
               </div>
               <div class="property-value">
                 <div class="url-input-wrapper">
-                  <input 
-                    type="text" 
-                    class="property-input" 
+                  <textarea 
+                    class="property-textarea url-textarea" 
                     bind:value={editSourceUrl} 
-                    placeholder="无来源 URL" 
-                  />
+                    bind:this={urlTextareaRef}
+                    placeholder="无来源 URL"
+                    rows="1"
+                    oninput={(e) => {
+                      const target = e.target as HTMLTextAreaElement;
+                      target.style.height = 'auto';
+                      target.style.height = target.scrollHeight + 'px';
+                    }}
+                  ></textarea>
                   {#if editSourceUrl && editSourceUrl.trim()}
                     <a 
                       href={editSourceUrl.trim()} 
@@ -1341,7 +1390,7 @@
 
   .property-textarea {
     width: 100%;
-    font-size: 16px;
+    font-size: 18px;
     font-weight: 700;
     color: var(--text-ink);
     border: none;
@@ -1349,10 +1398,11 @@
     outline: none;
     resize: none;
     padding: 6px 0;
-    font-family: var(--font-serif), Georgia, serif;
+    font-family: var(--font-sans), sans-serif;
     border-bottom: 1px dashed var(--border-fine);
     transition: border-color 0.2s ease;
     line-height: 1.4;
+    overflow-y: hidden;
   }
 
   .property-textarea:focus {
@@ -1445,6 +1495,73 @@
     align-items: center;
   }
 
+  /* Inline New Topic Creator */
+  .new-topic-inline-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    animation: slideInLeft 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  @keyframes slideInLeft {
+    from { opacity: 0; transform: translateX(-8px); }
+    to { opacity: 1; transform: translateX(0); }
+  }
+
+  .new-topic-input {
+    flex: 1;
+    min-width: 0;
+    border: 1px solid var(--border-fine) !important;
+    border-radius: 6px !important;
+    padding: 6px 10px !important;
+    background: var(--bg-paper) !important;
+    font-size: 13px !important;
+    font-family: var(--font-sans), sans-serif;
+  }
+
+  .new-topic-input:focus {
+    border-color: var(--accent-ochre) !important;
+    box-shadow: 0 0 0 2px rgba(178, 90, 56, 0.1);
+  }
+
+  .new-topic-actions {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+  }
+
+  .inline-action-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    border: 1px solid var(--border-fine);
+    background: var(--bg-paper);
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .inline-action-btn:hover {
+    background: var(--bg-card-hover);
+    color: var(--text-ink);
+  }
+
+  .inline-action-btn.confirm:hover {
+    border-color: var(--accent-ochre);
+    color: var(--accent-ochre);
+    background: var(--bg-card-hover);
+  }
+
+  .inline-action-btn.cancel:hover {
+    border-color: var(--accent-terracotta);
+    color: var(--accent-terracotta);
+    background: rgba(197, 48, 48, 0.04);
+  }
+
   /* Source URL input wrapper */
   .url-input-wrapper {
     display: flex;
@@ -1458,9 +1575,22 @@
     border-bottom-color: var(--accent-ochre);
   }
 
-  .url-input-wrapper .property-input {
+  .url-input-wrapper .url-textarea {
     border-bottom: none;
     padding-right: 8px;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .url-textarea {
+    font-size: 13px !important;
+    font-weight: 500 !important;
+    font-family: var(--font-sans), sans-serif !important;
+    border-bottom: none !important;
+    padding: 6px 0 !important;
+    line-height: 1.5 !important;
+    overflow-y: hidden;
+    word-break: break-all;
   }
 
   .url-visit-btn {
