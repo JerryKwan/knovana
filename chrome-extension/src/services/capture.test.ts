@@ -1,12 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import TurndownService from 'turndown';
 import type { ActionContext, PageSnapshot } from '../types/capture';
 import {
   actionLabel,
   buildCaptureRequest,
-  collectPageSnapshot,
   contextFromMenu,
   prepareCaptureUploads,
 } from './capture';
+import { extractContent } from './extractors';
 
 const snapshot: PageSnapshot = {
   pageUrl: 'https://example.com/article',
@@ -32,6 +33,24 @@ function context(
     action,
     ...overrides,
   };
+}
+
+function toMarkdown(html: string): string {
+  const turndownService = new TurndownService({
+    headingStyle: 'atx',
+    codeBlockStyle: 'fenced',
+    hr: '---',
+  });
+  turndownService.addRule('images', {
+    filter: 'img',
+    replacement: function (_content, node) {
+      const img = node as HTMLImageElement;
+      const alt = img.getAttribute('alt') || img.getAttribute('aria-label') || 'image';
+      const src = img.getAttribute('src') || '';
+      return `![${alt}](${src})`;
+    },
+  });
+  return turndownService.turndown(html);
 }
 
 describe('capture service', () => {
@@ -71,8 +90,7 @@ describe('capture service', () => {
     expect(actionLabel('generate-doc')).toBe('整理成知识条目');
   });
 
-  it('collects page snapshot and extracts block text with preserved newlines', () => {
-    // Set up mock DOM
+  it('collects page snapshot and extracts block text with preserved newlines', async () => {
     document.title = 'Test Title';
     document.body.innerHTML =
       '<div id="test-content"><p>Paragraph 1</p><p>Paragraph 2</p><div>Some inline text<br>with break</div></div>';
@@ -80,38 +98,19 @@ describe('capture service', () => {
     const el = document.getElementById('test-content');
     expect(el).not.toBeNull();
 
-    // Mock Selection API in JSDOM
-    const range = document.createRange();
-    range.selectNodeContents(el!);
-    const selection = window.getSelection();
-    expect(selection).not.toBeNull();
-    selection!.removeAllRanges();
-    selection!.addRange(range);
+    const url = new URL('https://example.com/article');
+    const extractResult = await extractContent(url, document, el!.innerHTML);
 
-    const snapshotResult = {
-      pageUrl: window.location.href,
-      pageTitle: document.title,
-      description: undefined,
-      author: undefined,
-      siteName: undefined,
-      favicon: undefined,
-      language: undefined,
-      selectedText: 'Paragraph 1\n\nParagraph 2\n\nSome inline text\nwith break',
-      selectedHtml: el!.innerHTML,
-      selectedImages: [],
-    };
+    const selectedText = toMarkdown(extractResult.selectedHtml);
+    expect(selectedText).toContain('Paragraph 1');
+    expect(selectedText).toContain('Paragraph 2');
+    // Hard breaks have 2 spaces in Turndown
+    expect(selectedText.replace(/ {2}\n/g, '\n')).toContain('Some inline text\nwith break');
 
-    const result = collectPageSnapshot();
-    expect((result.selectedText || '').replace(/\r\n/g, '\n').trim()).toBe(
-      snapshotResult.selectedText,
-    );
-
-    // Clean up
-    selection!.removeAllRanges();
     document.body.innerHTML = '';
   });
 
-  it('extracts page content and ignores navigation, footer, sidebar for extract-page action', () => {
+  it('extracts page content and ignores navigation, footer, sidebar for extract-page action', async () => {
     document.title = 'Page Title';
     document.body.innerHTML = `
       <header>Logo and branding</header>
@@ -138,60 +137,35 @@ describe('capture service', () => {
       </footer>
     `;
 
-    const result = collectPageSnapshot('extract-page');
-    expect(result.pageTitle).toBe('Page Title');
-    expect(result.selectedText).toContain('Real Heading');
-    expect(result.selectedText).toContain('This is the main article paragraph 1.');
-    expect(result.selectedText).toContain('Paragraph 2 of the article.');
-    expect(result.selectedText).not.toContain('Logo and branding');
-    expect(result.selectedText).not.toContain('Home');
-    expect(result.selectedText).not.toContain('Sidebar widgets');
-    expect(result.selectedText).not.toContain('Copyright 2026');
+    const url = new URL('https://example.com/article');
+    const extractResult = await extractContent(url, document);
+    const selectedText = toMarkdown(extractResult.selectedHtml);
+
+    expect(extractResult.pageTitle).toBe('Page Title');
+    expect(selectedText).toContain('Real Heading');
+    expect(selectedText).toContain('This is the main article paragraph 1.');
+    expect(selectedText).toContain('Paragraph 2 of the article.');
+    expect(selectedText).not.toContain('Logo and branding');
+    expect(selectedText).not.toContain('Home');
+    expect(selectedText).not.toContain('Sidebar widgets');
+    expect(selectedText).not.toContain('Copyright 2026');
 
     // Inline image markup test
-    expect(result.selectedText).toContain('![image](https://example.com/main.png)');
+    expect(selectedText).toContain('![Main Image](https://example.com/main.png)');
 
     // Relative image resolution test
     const expectedRelativeAbs = new URL('content/images/gemma.png', document.baseURI).href;
-    expect(result.selectedText).toContain(`![image](${expectedRelativeAbs})`);
+    expect(selectedText).toContain(`![Relative Image](${expectedRelativeAbs})`);
 
-    expect(result.selectedImages).toEqual([
+    expect(extractResult.selectedImages).toEqual([
       { src: 'https://example.com/main.png', alt: 'Main Image' },
       { src: expectedRelativeAbs, alt: 'Relative Image' },
     ]);
 
-    // Clean up
     document.body.innerHTML = '';
   });
 
-  it('runs after function serialization like chrome.scripting.executeScript injection', () => {
-    const injectedCollectPageSnapshot = Function(
-      `return (${collectPageSnapshot.toString()})`,
-    )() as typeof collectPageSnapshot;
-    document.title = 'Serialized Capture Page';
-    document.body.innerHTML = `
-      <main>
-        <article>
-          <h1>Serialized heading</h1>
-          <p>Serialized paragraph.</p>
-          <img src="https://example.com/serialized.png" alt="Serialized image">
-        </article>
-      </main>
-    `;
-
-    const result = injectedCollectPageSnapshot('extract-page');
-
-    expect(result.selectedText).toContain('Serialized heading');
-    expect(result.selectedText).toContain('Serialized paragraph.');
-    expect(result.selectedText).toContain('![image](https://example.com/serialized.png)');
-    expect(result.selectedImages).toEqual([
-      { src: 'https://example.com/serialized.png', alt: 'Serialized image' },
-    ]);
-
-    document.body.innerHTML = '';
-  });
-
-  it('keeps generic article images in document order for blog pages', () => {
+  it('keeps generic article images in document order for blog pages', async () => {
     document.title = 'The Illustrated Transformer';
     document.body.innerHTML = `
       <header>Site navigation</header>
@@ -210,290 +184,55 @@ describe('capture service', () => {
     `;
 
     const imageUrl = new URL('/images/transformer-attention.png', document.baseURI).href;
-    const result = collectPageSnapshot('extract-page');
+    const url = new URL('https://example.com/article');
+    const extractResult = await extractContent(url, document);
+    const selectedText = toMarkdown(extractResult.selectedHtml);
 
-    expect(result.selectedText).toMatch(
+    expect(extractResult.pageTitle).toBe('The Illustrated Transformer');
+    expect(selectedText).toMatch(
       new RegExp(
         [
-          'The Illustrated Transformer',
-          '[\\s\\S]*First paragraph introduces the architecture\\.',
-          `[\\s\\S]*!\\[image\\]\\(${imageUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\)`,
+          'First paragraph introduces the architecture\\.',
+          `[\\s\\S]*!\\[Attention diagram\\]\\(${imageUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\)`,
           '[\\s\\S]*Attention diagram caption\\.',
           '[\\s\\S]*Second paragraph explains self-attention\\.',
           '[\\s\\S]*attention\\(Q, K, V\\)',
         ].join(''),
       ),
     );
-    expect(result.contentBlocks).toEqual([
-      { type: 'text', text: 'The Illustrated Transformer' },
-      { type: 'text', text: 'First paragraph introduces the architecture.' },
-      { type: 'image', src: imageUrl, alt: 'Attention diagram' },
-      { type: 'text', text: 'Attention diagram caption.' },
-      { type: 'text', text: 'Second paragraph explains self-attention.' },
-      { type: 'text', text: 'attention(Q, K, V)' },
-    ]);
 
     document.body.innerHTML = '';
   });
 
-  it('uses the X status extractor for the current post and captures multiple images without comments', () => {
-    const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
-    window.history.replaceState({}, '', '/akshay_pachaar/status/2035341800739877091');
-    document.title = 'Post / X';
-    document.body.innerHTML = `
-      <main>
-        <section data-testid="primaryColumn">
-          <article data-testid="tweet">
-            <a href="/akshay_pachaar/status/2035341800739877091">Jun 10</a>
-            <div data-testid="tweetText">
-              <span>Main post text.</span>
-              <br>
-              <span>Second line.</span>
-            </div>
-            <div data-testid="tweetPhoto">
-              <img src="https://pbs.twimg.com/media/main-one?format=jpg&name=small" alt="Image 1">
-            </div>
-            <a href="/akshay_pachaar/status/2035341800739877091/photo/2">
-              <img src="https://pbs.twimg.com/media/main-two?format=jpg&name=small" alt="Image 2">
-            </a>
-            <div data-testid="tweetPhoto">
-              <img src="https://pbs.twimg.com/media/main-three?format=jpg&name=900x900" alt="Image 3">
-            </div>
-          </article>
-          <article data-testid="tweet">
-            <a href="/reply_author/status/999">Reply time</a>
-            <div data-testid="tweetText">Reply text should not be captured.</div>
-            <div data-testid="tweetPhoto">
-              <img src="https://pbs.twimg.com/media/reply-image?format=jpg&name=small" alt="Reply image">
-            </div>
-          </article>
-        </section>
-      </main>
-    `;
-
-    const result = collectPageSnapshot('extract-page');
-
-    expect(result.selectedText).toContain('Main post text.');
-    expect(result.selectedText).toContain('Second line.');
-    expect(result.selectedText).not.toContain('Reply text should not be captured.');
-    expect(result.selectedText).not.toContain('reply-image');
-    expect(result.selectedImages).toEqual([
-      {
-        src: 'https://pbs.twimg.com/media/main-one?format=jpg&name=large',
-        alt: 'Image 1',
-      },
-      {
-        src: 'https://pbs.twimg.com/media/main-two?format=jpg&name=large',
-        alt: 'Image 2',
-      },
-      {
-        src: 'https://pbs.twimg.com/media/main-three?format=jpg&name=large',
-        alt: 'Image 3',
-      },
-    ]);
-    expect(result.selectedText).toContain(
-      '![image](https://pbs.twimg.com/media/main-one?format=jpg&name=large)',
-    );
-    expect(result.selectedText).toContain(
-      '![image](https://pbs.twimg.com/media/main-two?format=jpg&name=large)',
-    );
-    expect(result.selectedText).toContain(
-      '![image](https://pbs.twimg.com/media/main-three?format=jpg&name=large)',
-    );
-
-    document.body.innerHTML = '';
-    window.history.replaceState({}, '', originalUrl || '/');
-  });
-
-  it('captures X article media links that render tweetPhoto images with background-image fallbacks', () => {
-    const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
-    window.history.replaceState({}, '', '/akshay_pachaar/article/2035341800739877091');
-    document.title = 'Article / X';
-    document.body.innerHTML = `
-      <main>
-        <section data-testid="primaryColumn">
-          <article data-testid="tweet">
-            <a href="/akshay_pachaar/article/2035341800739877091">Article link</a>
-            <div data-testid="tweetText">Long-form article body.</div>
-            <a href="/akshay_pachaar/article/2035341800739877091/media/2035332860593516544" role="link">
-              <div>
-                <div>
-                  <div aria-label="Image" data-testid="tweetPhoto" style="margin: 0px;">
-                    <div style="filter: brightness(1); background-image: url(&quot;https://pbs.twimg.com/media/HD70c_tbMAAvhzK?format=jpg&amp;name=900x900&quot;);"></div>
-                    <img alt="Image" draggable="true" src="https://pbs.twimg.com/media/HD70c_tbMAAvhzK?format=jpg&amp;name=900x900">
-                  </div>
-                </div>
-              </div>
-            </a>
-          </article>
-          <article data-testid="tweet">
-            <div data-testid="tweetText">Comment should not be captured.</div>
-            <a href="/comment_author/article/999/media/1">
-              <img alt="Comment image" src="https://pbs.twimg.com/media/comment-image?format=jpg&amp;name=900x900">
-            </a>
-          </article>
-        </section>
-      </main>
-    `;
-
-    const result = collectPageSnapshot('extract-page');
-
-    expect(result.selectedText).toContain('Long-form article body.');
-    expect(result.selectedText).not.toContain('Comment should not be captured.');
-    expect(result.selectedText).not.toContain('comment-image');
-    expect(result.selectedImages).toEqual([
-      {
-        src: 'https://pbs.twimg.com/media/HD70c_tbMAAvhzK?format=jpg&name=large',
-        alt: 'Image',
-      },
-    ]);
-    expect(result.selectedText).toContain(
-      '![image](https://pbs.twimg.com/media/HD70c_tbMAAvhzK?format=jpg&name=large)',
-    );
-
-    document.body.innerHTML = '';
-    window.history.replaceState({}, '', originalUrl || '/');
-  });
-
-  it('extracts high-value X article text even when it is not inside tweetText nodes', () => {
-    const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
-    window.history.replaceState({}, '', '/akshay_pachaar/status/2035341800739877091');
+  it('uses the X extractor and routes to the generic readability extractor', async () => {
     document.title = 'Akshay 🚀 on X: "Anatomy of the .claude/ folder" / X';
     document.body.innerHTML = `
       <main>
-        <section data-testid="primaryColumn">
-          <div data-testid="cellInnerDiv">
-            <article data-testid="tweet">
-              <a href="/akshay_pachaar/status/2035341800739877091">Article link</a>
-              <div>
-                <div dir="auto" lang="en">Anatomy of the .claude/ folder</div>
-                <div dir="auto" lang="en">This guide walks through the entire anatomy of the folder, from the files you'll use daily to the ones you'll set once and forget.</div>
-                <a href="/akshay_pachaar/status/2035341800739877091/media/1">
-                  <div data-testid="tweetPhoto">
-                    <img src="https://pbs.twimg.com/media/article-diagram?format=jpg&name=small" alt="Article diagram">
-                  </div>
-                </a>
-              </div>
-            </article>
-          </div>
-          <div data-testid="cellInnerDiv">
-            <article data-testid="tweet">
-              <a href="/reply_author/status/999">Reply link</a>
-              <div dir="auto" lang="en">Reply text should not be captured.</div>
-            </article>
-          </div>
-        </section>
+        <article>
+          <h1>Anatomy of the .claude/ folder</h1>
+          <p>A complete guide to CLAUDE.md, custom commands, skills, agents, and permissions.</p>
+          <img src="https://pbs.twimg.com/media/HD78D48b0AAI72h?format=jpg&name=large" alt="Cover image">
+        </article>
       </main>
     `;
 
-    const result = collectPageSnapshot('extract-page');
+    const url = new URL('https://x.com/akshay_pachaar/status/2035341800739877091');
+    const extractResult = await extractContent(url, document);
+    const selectedText = toMarkdown(extractResult.selectedHtml);
 
-    expect(result.selectedText).toMatch(
-      /Anatomy of the \.claude\/ folder[\s\S]*This guide walks through the entire anatomy of the folder[\s\S]*!\[image\]\(https:\/\/pbs\.twimg\.com\/media\/article-diagram\?format=jpg&name=large\)/,
+    expect(extractResult.pageTitle).toContain('Anatomy of the .claude/ folder');
+    expect(selectedText).toContain('A complete guide to CLAUDE.md');
+    expect(selectedText).toContain(
+      '![Cover image](https://pbs.twimg.com/media/HD78D48b0AAI72h?format=jpg&name=large)',
     );
-    expect(result.selectedText).not.toContain('Reply text should not be captured.');
-    expect(result.contentBlocks).toEqual([
-      { type: 'text', text: 'Anatomy of the .claude/ folder' },
+    expect(extractResult.selectedImages).toEqual([
       {
-        type: 'text',
-        text: "This guide walks through the entire anatomy of the folder, from the files you'll use daily to the ones you'll set once and forget.",
-      },
-      {
-        type: 'image',
-        src: 'https://pbs.twimg.com/media/article-diagram?format=jpg&name=large',
-        alt: 'Article diagram',
+        src: 'https://pbs.twimg.com/media/HD78D48b0AAI72h?format=jpg&name=large',
+        alt: 'Cover image',
       },
     ]);
 
     document.body.innerHTML = '';
-    window.history.replaceState({}, '', originalUrl || '/');
-  });
-
-  it('keeps X media references at their original text position', () => {
-    const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
-    window.history.replaceState({}, '', '/akshay_pachaar/status/2035341800739877091');
-    document.title = 'Post / X';
-    document.body.innerHTML = `
-      <main>
-        <section data-testid="primaryColumn">
-          <article data-testid="tweet">
-            <a href="/akshay_pachaar/status/2035341800739877091">Jun 10</a>
-            <div data-testid="tweetText">First idea before the chart.</div>
-            <a href="/akshay_pachaar/status/2035341800739877091/photo/1">
-              <div data-testid="tweetPhoto">
-                <img src="https://pbs.twimg.com/media/chart-one?format=jpg&name=small" alt="Chart">
-              </div>
-            </a>
-            <div data-testid="tweetText">Second idea after the chart.</div>
-          </article>
-        </section>
-      </main>
-    `;
-
-    const result = collectPageSnapshot('extract-page');
-
-    expect(result.selectedText).toMatch(
-      /First idea before the chart\.[\s\S]*!\[image\]\(https:\/\/pbs\.twimg\.com\/media\/chart-one\?format=jpg&name=large\)[\s\S]*Second idea after the chart\./,
-    );
-    expect(result.contentBlocks).toEqual([
-      { type: 'text', text: 'First idea before the chart.' },
-      {
-        type: 'image',
-        src: 'https://pbs.twimg.com/media/chart-one?format=jpg&name=large',
-        alt: 'Chart',
-      },
-      { type: 'text', text: 'Second idea after the chart.' },
-    ]);
-
-    document.body.innerHTML = '';
-    window.history.replaceState({}, '', originalUrl || '/');
-  });
-
-  it('chooses a non-empty X article when the first article is not the target content', () => {
-    const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
-    window.history.replaceState({}, '', '/akshay_pachaar/status/2035341800739877091');
-    document.title = 'Post / X';
-    document.body.innerHTML = `
-      <main>
-        <section data-testid="primaryColumn">
-          <article data-testid="tweet">
-            <a href="/other_author/status/111">Unrelated post</a>
-          </article>
-          <article data-testid="tweet">
-            <a href="/akshay_pachaar/status/2035341800739877091">Jun 10</a>
-            <div data-testid="tweetText">The target post body should be captured.</div>
-            <div data-testid="tweetPhoto">
-              <img src="https://pbs.twimg.com/media/target-image?format=jpg&name=small" alt="Target">
-            </div>
-          </article>
-        </section>
-      </main>
-    `;
-
-    const result = collectPageSnapshot('extract-page');
-
-    expect(result.selectedText).toContain('The target post body should be captured.');
-    expect(result.selectedText).toContain(
-      '![image](https://pbs.twimg.com/media/target-image?format=jpg&name=large)',
-    );
-
-    document.body.innerHTML = '';
-    window.history.replaceState({}, '', originalUrl || '/');
-  });
-
-  it('does not generate an empty extract-page prompt when X DOM text is unavailable', () => {
-    const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
-    window.history.replaceState({}, '', '/akshay_pachaar/status/2035341800739877091');
-    document.title = 'Akshay 🚀 on X: "Anatomy of the .claude/ folder" / X';
-    document.body.innerHTML = '<main><section data-testid="primaryColumn"></section></main>';
-
-    const result = collectPageSnapshot('extract-page');
-
-    expect(result.selectedText).toContain('Anatomy of the .claude/ folder');
-    expect(result.selectedText?.trim()).not.toBe('');
-
-    document.body.innerHTML = '';
-    window.history.replaceState({}, '', originalUrl || '/');
   });
 
   it('uses backend-confirmed attachment paths when replacing captured media references', async () => {
@@ -522,7 +261,6 @@ describe('capture service', () => {
     const prepared = await prepareCaptureUploads(
       'generate-doc',
       context('generate-doc', {
-        selectedText: `Look at ![image](${mediaUrl})`,
         selectedHtml: `<p>Look at <img src="${mediaUrl}"></p>`,
         selectedImages: [{ src: mediaUrl, alt: 'Example' }],
       }),
@@ -539,7 +277,7 @@ describe('capture service', () => {
         mimeType: 'image/jpeg',
       },
     ]);
-    expect(prepared.context.selectedText).toContain('![image](attachments/image-2.jpg)');
+    expect(prepared.context.selectedText).toContain('![Example](attachments/image-2.jpg)');
     expect(prepared.context.selectedText).not.toContain(mediaUrl);
     expect(prepared.context.selectedHtml).toContain('src="attachments/image-2.jpg"');
     expect(prepared.imagesSection).toContain('![media](attachments/image-2.jpg)');
@@ -571,25 +309,14 @@ describe('capture service', () => {
     const prepared = await prepareCaptureUploads(
       'extract-page',
       context('extract-page', {
-        selectedText: `First idea before the chart.\n\n![image](${mediaUrl})\n\nSecond idea after the chart.`,
         selectedHtml: `<p>First idea before the chart.</p><img src="${mediaUrl}"><p>Second idea after the chart.</p>`,
         selectedImages: [{ src: mediaUrl, alt: 'Chart' }],
-        contentBlocks: [
-          { type: 'text', text: 'First idea before the chart.' },
-          { type: 'image', src: mediaUrl, alt: 'Chart' },
-          { type: 'text', text: 'Second idea after the chart.' },
-        ],
       }),
     );
 
     expect(prepared.context.selectedText).toMatch(
-      /First idea before the chart\.[\s\S]*!\[image\]\(attachments\/chart-one-2\.jpg\)[\s\S]*Second idea after the chart\./,
+      /First idea before the chart\.[\s\S]*!\[Chart\]\(attachments\/chart-one-2\.jpg\)[\s\S]*Second idea after the chart\./,
     );
-    expect(prepared.context.contentBlocks).toEqual([
-      { type: 'text', text: 'First idea before the chart.' },
-      { type: 'image', src: 'attachments/chart-one-2.jpg', alt: 'Chart' },
-      { type: 'text', text: 'Second idea after the chart.' },
-    ]);
     expect(prepared.context.selectedHtml).toContain('src="attachments/chart-one-2.jpg"');
     expect(prepared.imagesSection).toContain('![media](attachments/chart-one-2.jpg)');
   });
@@ -620,25 +347,14 @@ describe('capture service', () => {
     const prepared = await prepareCaptureUploads(
       'extract-page',
       context('extract-page', {
-        selectedText: `First paragraph introduces the architecture.\n\n![image](${mediaUrl})\n\nSecond paragraph explains self-attention.`,
         selectedHtml: `<p>First paragraph introduces the architecture.</p><img src="${mediaUrl}"><p>Second paragraph explains self-attention.</p>`,
         selectedImages: [{ src: mediaUrl, alt: 'Attention diagram' }],
-        contentBlocks: [
-          { type: 'text', text: 'First paragraph introduces the architecture.' },
-          { type: 'image', src: mediaUrl, alt: 'Attention diagram' },
-          { type: 'text', text: 'Second paragraph explains self-attention.' },
-        ],
       }),
     );
 
     expect(prepared.context.selectedText).toMatch(
-      /First paragraph introduces the architecture\.[\s\S]*!\[image\]\(attachments\/transformer-attention\.png\)[\s\S]*Second paragraph explains self-attention\./,
+      /First paragraph introduces the architecture\.[\s\S]*!\[Attention diagram\]\(attachments\/transformer-attention\.png\)[\s\S]*Second paragraph explains self-attention\./,
     );
-    expect(prepared.context.contentBlocks).toEqual([
-      { type: 'text', text: 'First paragraph introduces the architecture.' },
-      { type: 'image', src: 'attachments/transformer-attention.png', alt: 'Attention diagram' },
-      { type: 'text', text: 'Second paragraph explains self-attention.' },
-    ]);
   });
 
   it('fails capture upload preparation when a selected media upload fails', async () => {

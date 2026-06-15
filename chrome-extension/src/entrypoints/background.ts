@@ -1,7 +1,6 @@
 import { apiJson, apiStream } from '../services/api';
 import {
   actionLabel,
-  collectPageSnapshot,
   contextFromMenu,
   createPendingAction,
   prepareCaptureUploads,
@@ -177,7 +176,7 @@ async function handleContextMenu(
       .executeScript({
         target: { tabId: tab.id },
         func: notifyCapturePreparationFailed,
-        args: [error instanceof Error ? error.message : String(error)],
+        args: [error instanceof Error ? error.stack || error.message : String(error)],
       })
       .catch(() => undefined);
     return;
@@ -511,15 +510,30 @@ async function getTabSnapshot(tab: chrome.tabs.Tab, action?: CaptureAction): Pro
     return emptySnapshot(tab);
   }
 
-  try {
-    const [result] = await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: collectPageSnapshot,
-      args: [action],
+  const sendCollectMessage = () => {
+    return chrome.tabs.sendMessage(tab.id!, {
+      type: 'COLLECT_PAGE_SNAPSHOT',
+      payload: { action },
     });
-    return result?.result ?? emptySnapshot(tab);
+  };
+
+  try {
+    const response = await sendCollectMessage();
+    return response || emptySnapshot(tab);
   } catch {
-    return emptySnapshot(tab);
+    // If the message fails, the content script might not be injected yet
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        files: ['content-scripts/capture.js'],
+      });
+      // Try sending message again
+      const response = await sendCollectMessage();
+      return response || emptySnapshot(tab);
+    } catch (injectError) {
+      console.error('Failed to inject or communicate with content script:', injectError);
+      return emptySnapshot(tab);
+    }
   }
 }
 

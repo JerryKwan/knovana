@@ -1,9 +1,12 @@
+import TurndownService from 'turndown';
+import * as cheerio from 'cheerio';
+import { DOMParser } from 'linkedom';
+
 import { getSettings } from './storage';
 import type {
   ActionContext,
   ApiCaptureAction,
   CaptureAction,
-  CapturedContentBlock,
   CaptureRequestBody,
   PageSnapshot,
   PendingAction,
@@ -25,772 +28,6 @@ function normalizeCapturedMarkdown(text: string): string {
     .replace(/\r\n/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
-}
-
-function contentBlocksToMarkdown(blocks: CapturedContentBlock[]): string {
-  return normalizeCapturedMarkdown(
-    blocks
-      .map((block) => {
-        if (block.type === 'text') {
-          return block.text.trim();
-        }
-        return `![image](${block.src})`;
-      })
-      .filter(Boolean)
-      .join('\n\n'),
-  );
-}
-
-export function collectPageSnapshot(action?: CaptureAction): PageSnapshot {
-  const getMeta = (name: string) =>
-    document.querySelector<HTMLMetaElement>(`meta[name="${name}"], meta[property="${name}"]`)
-      ?.content;
-
-  const favicon =
-    document.querySelector<HTMLLinkElement>('link[rel~="icon"]')?.href ??
-    document.querySelector<HTMLLinkElement>('link[rel="shortcut icon"]')?.href;
-
-  const selection = window.getSelection();
-  let selectedText = '';
-  let selectedHtml = '';
-  let selectedImages: Array<{ src: string; alt?: string }> = [];
-  let contentBlocks: CapturedContentBlock[] | undefined;
-  type SnapshotContent = Pick<
-    PageSnapshot,
-    'selectedText' | 'selectedHtml' | 'selectedImages' | 'contentBlocks'
-  >;
-
-  function resolveAbsoluteUrl(url: string): string {
-    try {
-      return new URL(url, document.baseURI).href;
-    } catch {
-      return url;
-    }
-  }
-
-  function normalizeCapturedImageUrl(url: string): string {
-    const absolute = resolveAbsoluteUrl(url);
-    try {
-      const parsed = new URL(absolute);
-      if (parsed.hostname.endsWith('twimg.com') && parsed.pathname.includes('/media/')) {
-        parsed.searchParams.set('name', 'large');
-      }
-      return parsed.href;
-    } catch {
-      return absolute;
-    }
-  }
-
-  function getSrcsetCandidate(srcset: string): string {
-    const candidates = srcset
-      .split(',')
-      .map((item) => item.trim().split(/\s+/)[0])
-      .filter(Boolean);
-    return candidates[candidates.length - 1] || '';
-  }
-
-  function getBackgroundImageSource(element: Element): string {
-    const inlineBackground =
-      element instanceof HTMLElement
-        ? element.style.backgroundImage || element.style.background
-        : '';
-    const computedBackground =
-      typeof window.getComputedStyle === 'function'
-        ? window.getComputedStyle(element).backgroundImage
-        : '';
-    const match = (inlineBackground || computedBackground).match(/url\((['"]?)(.*?)\1\)/);
-    return match?.[2] || '';
-  }
-
-  function getImageSource(image: Element): string {
-    const htmlImage = image instanceof HTMLImageElement ? image : null;
-    const srcAttr =
-      image.getAttribute('data-src') ||
-      image.getAttribute('data-original-src') ||
-      image.getAttribute('data-original') ||
-      htmlImage?.currentSrc ||
-      getSrcsetCandidate(image.getAttribute('data-srcset') || image.getAttribute('srcset') || '') ||
-      image.getAttribute('src') ||
-      getBackgroundImageSource(image) ||
-      '';
-
-    return srcAttr ? normalizeCapturedImageUrl(srcAttr) : '';
-  }
-
-  function isCapturableImageUrl(src: string): boolean {
-    return src.startsWith('http://') || src.startsWith('https://') || src.startsWith('data:');
-  }
-
-  function toCapturedImage(image: HTMLImageElement): { src: string; alt?: string } | null {
-    const src = getImageSource(image);
-    if (!src || !isCapturableImageUrl(src)) {
-      return null;
-    }
-    return { src, alt: image.alt || undefined };
-  }
-
-  function toCapturedElementImage(element: Element): { src: string; alt?: string } | null {
-    const src = getImageSource(element);
-    if (!src || !isCapturableImageUrl(src)) {
-      return null;
-    }
-    const alt =
-      element instanceof HTMLImageElement
-        ? element.alt
-        : element.getAttribute('aria-label') || element.getAttribute('alt') || undefined;
-    return { src, alt: alt || undefined };
-  }
-
-  function collectImages(root: ParentNode, selector = 'img'): Array<{ src: string; alt?: string }> {
-    const seen = new Set<string>();
-    const images: Array<{ src: string; alt?: string }> = [];
-
-    Array.from(root.querySelectorAll<HTMLImageElement>(selector)).forEach((image) => {
-      const captured = toCapturedImage(image);
-      if (!captured || seen.has(captured.src)) {
-        return;
-      }
-      seen.add(captured.src);
-      images.push(captured);
-    });
-
-    return images;
-  }
-
-  function extractTextWithNewlines(node: Node): string {
-    if (node.nodeType === Node.TEXT_NODE) {
-      return node.nodeValue || '';
-    }
-    if (node.nodeType !== Node.ELEMENT_NODE) {
-      return '';
-    }
-
-    const element = node as Element;
-    const tagName = element.tagName.toUpperCase();
-
-    if (tagName === 'BR') {
-      return '\n';
-    }
-
-    if (tagName === 'IMG') {
-      const src = getImageSource(element);
-      if (src && isCapturableImageUrl(src)) {
-        return `\n\n![image](${src})\n\n`;
-      }
-      return '';
-    }
-
-    let text = '';
-    for (let i = 0; i < element.childNodes.length; i++) {
-      text += extractTextWithNewlines(element.childNodes[i]);
-    }
-
-    const blockTags = [
-      'P',
-      'DIV',
-      'H1',
-      'H2',
-      'H3',
-      'H4',
-      'H5',
-      'H6',
-      'LI',
-      'TR',
-      'BLOCKQUOTE',
-      'PRE',
-    ];
-    if (blockTags.includes(tagName)) {
-      const trimmed = text.trim();
-      if (trimmed) {
-        return `\n\n${trimmed}\n\n`;
-      }
-      return '';
-    }
-
-    return text;
-  }
-
-  function cleanNewlines(text: string): string {
-    return text
-      .replace(/\r\n/g, '\n')
-      .replace(/\n{3,}/g, '\n\n')
-      .trim();
-  }
-
-  function contentBlocksToMarkdownLocal(blocks: CapturedContentBlock[]): string {
-    return cleanNewlines(
-      blocks
-        .map((block) => {
-          if (block.type === 'text') {
-            return block.text.trim();
-          }
-          return `![image](${block.src})`;
-        })
-        .filter(Boolean)
-        .join('\n\n'),
-    );
-  }
-
-  function imagesFromContentBlocksLocal(
-    blocks: CapturedContentBlock[],
-  ): Array<{ src: string; alt?: string }> {
-    const seen = new Set<string>();
-    const images: Array<{ src: string; alt?: string }> = [];
-
-    for (const block of blocks) {
-      if (block.type !== 'image' || seen.has(block.src)) {
-        continue;
-      }
-      seen.add(block.src);
-      images.push({ src: block.src, alt: block.alt });
-    }
-
-    return images;
-  }
-
-  function fallbackTitleText(): string {
-    const title = document.title.replace(/\s+[-/]\s+X$/i, '').trim();
-    return title && title !== 'X' ? title : '';
-  }
-
-  function buildFallbackMarkdown(images: Array<{ src: string; alt?: string }>): string {
-    const textParts = [
-      getMeta('description') ?? getMeta('og:description') ?? '',
-      fallbackTitleText(),
-    ]
-      .map((item) => cleanNewlines(item))
-      .filter(Boolean);
-    const uniqueText = Array.from(new Set(textParts));
-    const imageParts = images.map((image) => `![image](${image.src})`);
-    return cleanNewlines([...uniqueText, ...imageParts].join('\n\n'));
-  }
-
-  function extractPlainTextWithBreaks(node: Node): string {
-    if (node.nodeType === Node.TEXT_NODE) {
-      return node.nodeValue || '';
-    }
-    if (node.nodeType !== Node.ELEMENT_NODE) {
-      return '';
-    }
-
-    const element = node as Element;
-    const tagName = element.tagName.toUpperCase();
-    if (tagName === 'BR') {
-      return '\n';
-    }
-    if (tagName === 'IMG') {
-      return element.getAttribute('alt') || '';
-    }
-
-    let text = '';
-    for (let i = 0; i < element.childNodes.length; i++) {
-      text += extractPlainTextWithBreaks(element.childNodes[i]);
-    }
-    if (['P', 'DIV', 'LI', 'BLOCKQUOTE'].includes(tagName)) {
-      const trimmed = text.trim();
-      return trimmed ? `\n${trimmed}\n` : '';
-    }
-    return text;
-  }
-
-  function extractGenericContentBlocks(root: Element): CapturedContentBlock[] {
-    const blocks: CapturedContentBlock[] = [];
-    const seenText = new Set<string>();
-    const seenImages = new Map<string, CapturedContentBlock & { type: 'image' }>();
-    const textBlockSelector = [
-      'h1',
-      'h2',
-      'h3',
-      'h4',
-      'h5',
-      'h6',
-      'p',
-      'li',
-      'blockquote',
-      'pre',
-      'figcaption',
-      'td',
-      'th',
-    ].join(',');
-    const imageSelector = ['img', 'picture img', 'figure img', '[style*="background-image"]'].join(
-      ',',
-    );
-
-    function appendTextBlock(element: Element): void {
-      const text = cleanNewlines(extractPlainTextWithBreaks(element));
-      if (!text || seenText.has(text)) {
-        return;
-      }
-      seenText.add(text);
-      blocks.push({ type: 'text', text });
-    }
-
-    function appendCapturedImage(captured: { src: string; alt?: string } | null): void {
-      if (!captured) {
-        return;
-      }
-      const existingImage = seenImages.get(captured.src);
-      if (existingImage) {
-        if (!existingImage.alt && captured.alt) {
-          existingImage.alt = captured.alt;
-        }
-        return;
-      }
-      const block: CapturedContentBlock & { type: 'image' } = {
-        type: 'image',
-        src: captured.src,
-        alt: captured.alt,
-      };
-      seenImages.set(captured.src, block);
-      blocks.push(block);
-    }
-
-    function appendImageBlock(element: Element): void {
-      const candidates = element.matches(imageSelector)
-        ? [element, ...Array.from(element.querySelectorAll<Element>(imageSelector))]
-        : Array.from(element.querySelectorAll<Element>(imageSelector));
-
-      for (const candidate of candidates) {
-        appendCapturedImage(toCapturedElementImage(candidate));
-      }
-    }
-
-    function traverse(node: Node): void {
-      if (node.nodeType !== Node.ELEMENT_NODE) {
-        return;
-      }
-
-      const element = node as Element;
-      if (element.matches(imageSelector)) {
-        appendImageBlock(element);
-        return;
-      }
-
-      if (element.matches(textBlockSelector)) {
-        appendTextBlock(element);
-        return;
-      }
-
-      if (
-        element.tagName.toUpperCase() === 'DIV' &&
-        !element.querySelector(`${textBlockSelector}, ${imageSelector}`)
-      ) {
-        appendTextBlock(element);
-        return;
-      }
-
-      for (let index = 0; index < element.childNodes.length; index += 1) {
-        traverse(element.childNodes[index]);
-      }
-    }
-
-    traverse(root);
-    return blocks;
-  }
-
-  function getXContentId(url: URL): string | null {
-    return url.pathname.match(/\/(?:status(?:es)?|article)\/(\d+)/)?.[1] ?? null;
-  }
-
-  function isXContentPage(url: URL): boolean {
-    const host = url.hostname.toLowerCase();
-    const isXHost =
-      host === 'x.com' ||
-      host.endsWith('.x.com') ||
-      host === 'twitter.com' ||
-      host.endsWith('.twitter.com');
-    const hasTweetDom = Boolean(document.querySelector('article[data-testid="tweet"]'));
-    return Boolean(getXContentId(url) && (isXHost || hasTweetDom));
-  }
-
-  function articleLinksToXContent(article: Element, contentId: string): boolean {
-    return Array.from(
-      article.querySelectorAll<HTMLAnchorElement>(
-        'a[href*="/status/"], a[href*="/statuses/"], a[href*="/article/"]',
-      ),
-    ).some((link) => {
-      const href = link.getAttribute('href') || link.href || '';
-      return (
-        href.includes(`/status/${contentId}`) ||
-        href.includes(`/statuses/${contentId}`) ||
-        href.includes(`/article/${contentId}`)
-      );
-    });
-  }
-
-  function getXArticleScore(article: Element, contentId: string, imageSelector: string): number {
-    let score = 0;
-    if (articleLinksToXContent(article, contentId)) {
-      score += 1000;
-    }
-    score += article.querySelectorAll('[data-testid="tweetText"]').length * 100;
-    score += article.querySelectorAll(imageSelector).length * 20;
-    score += Math.min(cleanNewlines(extractPlainTextWithBreaks(article)).length, 400);
-    return score;
-  }
-
-  function chooseXTargetArticle(
-    articles: HTMLElement[],
-    contentId: string,
-    imageSelector: string,
-  ): HTMLElement | undefined {
-    return articles
-      .map((article, index) => ({
-        article,
-        index,
-        score: getXArticleScore(article, contentId, imageSelector),
-      }))
-      .sort((a, b) => b.score - a.score || a.index - b.index)[0]?.article;
-  }
-
-  function extractXContentPage(url: URL): SnapshotContent | null {
-    const contentId = getXContentId(url);
-    if (!contentId) {
-      return null;
-    }
-
-    const scope =
-      document.querySelector('[data-testid="primaryColumn"]') ||
-      document.querySelector('main') ||
-      document.body;
-    const blocks: CapturedContentBlock[] = [];
-    const seenText = new Set<string>();
-    const seenImages = new Map<string, CapturedContentBlock & { type: 'image' }>();
-    const textSelector = [
-      '[data-testid="tweetText"]',
-      'h1',
-      'h2',
-      'h3',
-      'h4',
-      'h5',
-      'h6',
-      'p',
-      'li',
-      'blockquote',
-      'pre',
-      'figcaption',
-      'div[lang]',
-      '[dir="auto"][lang]',
-    ].join(',');
-    const imageSelector = [
-      '[data-testid="tweetPhoto"]',
-      '[data-testid="tweetPhoto"] img',
-      '[data-testid="tweetPhoto"] [style*="pbs.twimg.com/media/"]',
-      'a[href*="/photo/"] img',
-      'a[href*="/media/"] img',
-      'a[href*="/media/"] [style*="pbs.twimg.com/media/"]',
-      'img[src*="pbs.twimg.com/media/"]',
-      '[style*="pbs.twimg.com/media/"]',
-    ].join(',');
-    const articles = Array.from(
-      scope.querySelectorAll<HTMLElement>('article[data-testid="tweet"], article'),
-    );
-    const targetArticle = chooseXTargetArticle(articles, contentId, imageSelector);
-    if (!targetArticle) {
-      return null;
-    }
-    const targetRoot =
-      targetArticle.closest<HTMLElement>('[data-testid="cellInnerDiv"]') || targetArticle;
-
-    function belongsToTargetContent(element: Element): boolean {
-      const closestTweetArticle = element.closest('article[data-testid="tweet"]');
-      return !closestTweetArticle || closestTweetArticle === targetArticle;
-    }
-
-    function hasXTextBlock(blocksToCheck: CapturedContentBlock[]): boolean {
-      return blocksToCheck.some((block) => block.type === 'text' && block.text.trim().length > 0);
-    }
-
-    function isXChromeElement(element: Element): boolean {
-      return Boolean(
-        element.closest(
-          [
-            'button',
-            '[role="button"]',
-            '[role="menu"]',
-            '[role="menuitem"]',
-            '[data-testid="app-bar-close"]',
-            '[data-testid="reply"]',
-            '[data-testid="retweet"]',
-            '[data-testid="like"]',
-            '[data-testid="bookmark"]',
-            '[data-testid="share"]',
-            '[data-testid="caret"]',
-          ].join(','),
-        ),
-      );
-    }
-
-    function isLikelyXUiText(text: string, element: Element): boolean {
-      const normalized = cleanNewlines(text).replace(/\s+/g, ' ').trim();
-      if (!normalized) {
-        return true;
-      }
-      if (isXChromeElement(element)) {
-        return true;
-      }
-      if (/^@[\w_]{1,20}$/.test(normalized)) {
-        return true;
-      }
-      if (/^[·•]+$/.test(normalized)) {
-        return true;
-      }
-      if (/^\d+(?:[.,]\d+)?[KMB]?$/.test(normalized)) {
-        return true;
-      }
-      if (/^\d+[smhd]$/.test(normalized)) {
-        return true;
-      }
-      if (/^\d+\s*(?:views?|likes?|reposts?|replies|bookmarks?)$/i.test(normalized)) {
-        return true;
-      }
-      if (
-        /^(back|article|home|search|notifications|messages|lists|bookmarks|communities|premium|profile|more|post|reply|repost|like|share|follow|subscribe|show more|translate post|views?|image)$/i.test(
-          normalized,
-        )
-      ) {
-        return true;
-      }
-      return normalized.length < 8 && !/[.!?。！？:：]/.test(normalized);
-    }
-
-    function appendTextBlock(element: Element): void {
-      const text = cleanNewlines(extractPlainTextWithBreaks(element));
-      if (!text || isLikelyXUiText(text, element) || seenText.has(text)) {
-        return;
-      }
-      seenText.add(text);
-      blocks.push({ type: 'text', text });
-    }
-
-    function appendCapturedImage(captured: { src: string; alt?: string } | null): void {
-      if (!captured) {
-        return;
-      }
-      const existingImage = seenImages.get(captured.src);
-      if (existingImage) {
-        if (!existingImage.alt && captured.alt) {
-          existingImage.alt = captured.alt;
-        }
-        return;
-      }
-      const block: CapturedContentBlock & { type: 'image' } = {
-        type: 'image',
-        src: captured.src,
-        alt: captured.alt,
-      };
-      seenImages.set(captured.src, block);
-      blocks.push(block);
-    }
-
-    function appendImageBlock(element: Element): void {
-      const candidates = element.matches(imageSelector)
-        ? [element, ...Array.from(element.querySelectorAll<Element>(imageSelector))]
-        : Array.from(element.querySelectorAll<Element>(imageSelector));
-
-      for (const candidate of candidates) {
-        if (belongsToTargetContent(candidate)) {
-          appendCapturedImage(toCapturedElementImage(candidate));
-        }
-      }
-    }
-
-    function prependMetadataFallbackText(): void {
-      if (hasXTextBlock(blocks)) {
-        return;
-      }
-
-      const fallbackText = [
-        getMeta('description') ?? getMeta('og:description') ?? '',
-        fallbackTitleText(),
-        url.href,
-      ]
-        .map((item) => cleanNewlines(item))
-        .filter(Boolean)
-        .filter((item, index, items) => items.indexOf(item) === index)
-        .join('\n\n');
-
-      if (fallbackText) {
-        blocks.unshift({ type: 'text', text: fallbackText });
-      }
-    }
-
-    function traverseOrderedContent(node: Node): void {
-      if (node.nodeType !== Node.ELEMENT_NODE) {
-        return;
-      }
-
-      const element = node as Element;
-      if (!belongsToTargetContent(element)) {
-        return;
-      }
-
-      if (
-        element !== targetArticle &&
-        element !== targetRoot &&
-        element.matches('article[data-testid="tweet"], article')
-      ) {
-        return;
-      }
-
-      if (element.matches(imageSelector)) {
-        appendImageBlock(element);
-        return;
-      }
-
-      if (element.matches(textSelector)) {
-        appendTextBlock(element);
-        return;
-      }
-
-      if (
-        element.tagName.toUpperCase() === 'DIV' &&
-        !element.querySelector(`${textSelector}, ${imageSelector}`)
-      ) {
-        appendTextBlock(element);
-        return;
-      }
-
-      for (let index = 0; index < element.childNodes.length; index += 1) {
-        traverseOrderedContent(element.childNodes[index]);
-      }
-    }
-
-    traverseOrderedContent(targetRoot);
-
-    if (blocks.length === 0) {
-      const fallbackText = cleanNewlines(extractPlainTextWithBreaks(targetRoot));
-      if (fallbackText) {
-        blocks.unshift({ type: 'text', text: fallbackText });
-      }
-    }
-    prependMetadataFallbackText();
-
-    const selectedText = contentBlocksToMarkdownLocal(blocks);
-    const selectedImages = imagesFromContentBlocksLocal(blocks);
-    if (!selectedText && selectedImages.length === 0) {
-      return null;
-    }
-
-    return {
-      selectedHtml: targetRoot.innerHTML || '',
-      selectedText,
-      selectedImages,
-      contentBlocks: blocks,
-    };
-  }
-
-  function extractGenericPageContent(): SnapshotContent {
-    const docClone = document.cloneNode(true) as Document;
-    const body = docClone.body || docClone.documentElement;
-
-    const noiseTags = [
-      'script',
-      'style',
-      'noscript',
-      'iframe',
-      'svg',
-      'form',
-      'button',
-      'input',
-      'textarea',
-      'select',
-      'dialog',
-      'nav',
-      'header',
-      'footer',
-      'aside',
-    ];
-    body.querySelectorAll(noiseTags.join(',')).forEach((el) => el.remove());
-
-    const noisePattern =
-      /(^|[\s_-])(nav|menu|footer|header|aside|sidebar|comments?|ads?|advert|advertisement|sponsored?|social|share|sharing|related|recommend(?:ation)?|breadcrumbs?|pagination|banner|popup|widget)(?=$|[\s_-])/i;
-    body.querySelectorAll('*').forEach((el) => {
-      const descriptor = `${el.id || ''} ${el.getAttribute('class') || ''}`;
-      if (noisePattern.test(descriptor)) {
-        const textLen = el.textContent?.trim().length || 0;
-        if (textLen < 200) {
-          el.remove();
-        }
-      }
-    });
-
-    const targetElement =
-      body.querySelector('article') ||
-      body.querySelector('main') ||
-      body.querySelector('[role="main"]') ||
-      body.querySelector('#content') ||
-      body;
-
-    const contentBlocks = extractGenericContentBlocks(targetElement);
-    const selectedTextFromBlocks = contentBlocksToMarkdownLocal(contentBlocks);
-    const selectedImages =
-      contentBlocks.length > 0
-        ? imagesFromContentBlocksLocal(contentBlocks)
-        : collectImages(targetElement);
-
-    return {
-      selectedHtml: targetElement.innerHTML || '',
-      selectedText: selectedTextFromBlocks || cleanNewlines(extractTextWithNewlines(targetElement)),
-      selectedImages,
-      contentBlocks: contentBlocks.length > 0 ? contentBlocks : undefined,
-    };
-  }
-
-  function extractSiteSpecificPageContent(): SnapshotContent | null {
-    try {
-      const url = new URL(window.location.href);
-      if (isXContentPage(url)) {
-        return extractXContentPage(url);
-      }
-    } catch {
-      return null;
-    }
-    return null;
-  }
-
-  if (action === 'extract-page') {
-    const extracted = extractSiteSpecificPageContent() || extractGenericPageContent();
-    selectedHtml = extracted.selectedHtml || '';
-    selectedText = extracted.selectedText || '';
-    selectedImages = extracted.selectedImages;
-    contentBlocks = extracted.contentBlocks;
-    if (!selectedText.trim()) {
-      selectedText = buildFallbackMarkdown(selectedImages);
-    }
-  } else if (selection && !selection.isCollapsed && selection.rangeCount > 0) {
-    const container = document.createElement('div');
-    for (let index = 0; index < selection.rangeCount; index += 1) {
-      container.append(selection.getRangeAt(index).cloneContents());
-    }
-    selectedHtml = container.innerHTML;
-    contentBlocks = extractGenericContentBlocks(container);
-    selectedText =
-      contentBlocksToMarkdownLocal(contentBlocks) ||
-      cleanNewlines(extractTextWithNewlines(container)) ||
-      selection.toString().trim();
-    selectedImages =
-      contentBlocks.length > 0
-        ? imagesFromContentBlocksLocal(contentBlocks)
-        : collectImages(container);
-    if (contentBlocks.length === 0) {
-      contentBlocks = undefined;
-    }
-  }
-
-  return {
-    pageUrl: window.location.href,
-    pageTitle: document.title,
-    description: getMeta('description') ?? getMeta('og:description'),
-    author: getMeta('author'),
-    siteName: getMeta('og:site_name'),
-    favicon,
-    language: document.documentElement.lang || undefined,
-    selectedText,
-    selectedHtml,
-    selectedImages,
-    contentBlocks,
-  };
 }
 
 export function contextFromMenu(
@@ -831,7 +68,6 @@ export async function prepareCaptureUploads(
   let mediaLocalPath = context.mediaLocalPath || '';
   let selectedText = context.selectedText || '';
   let selectedHtml = context.selectedHtml || '';
-  let contentBlocks = context.contentBlocks ? [...context.contentBlocks] : undefined;
 
   if (action === 'save-media' && context.mediaUrl && !mediaLocalPath) {
     const uploaded = await downloadAndUploadAsset(context.mediaUrl);
@@ -845,20 +81,57 @@ export async function prepareCaptureUploads(
       context.selectedImages.map(async (img) => {
         const uploaded = await downloadAndUploadAsset(img.src);
         const asset = toUploadedCaptureAsset('content-image', img.src, uploaded);
-        return { original: img.src, asset };
+        return { original: img.src, asset, alt: img.alt };
       }),
     );
 
+    if (selectedHtml) {
+      const $ = cheerio.load(selectedHtml);
+      for (const item of uploadedImages) {
+        uploadedAssets.push(item.asset);
+        // Robust iteration to find and replace img src and alt
+        $('img').each((_, imgEl) => {
+          const currentSrc = $(imgEl).attr('src');
+          if (currentSrc === item.original || currentSrc === encodeURI(item.original)) {
+            $(imgEl).attr('src', item.asset.path);
+            if (item.alt && !$(imgEl).attr('alt')) {
+              $(imgEl).attr('alt', item.alt);
+            }
+          }
+        });
+      }
+      selectedHtml = $('body').html() || selectedHtml;
+    }
+
     for (const item of uploadedImages) {
-      uploadedAssets.push(item.asset);
-      selectedHtml = replaceMediaReference(selectedHtml, item.original, item.asset.path);
       selectedText = replaceMediaReference(selectedText, item.original, item.asset.path);
-      contentBlocks = replaceContentBlockMediaRefs(contentBlocks, item.original, item.asset.path);
     }
   }
 
-  if (contentBlocks) {
-    selectedText = contentBlocksToMarkdown(contentBlocks);
+  // Convert HTML to Markdown using Turndown in the background script
+  if (selectedHtml) {
+    const turndownService = new TurndownService({
+      headingStyle: 'atx',
+      codeBlockStyle: 'fenced',
+      hr: '---',
+    });
+    // Add custom rule to prevent double escaping of common characters
+    turndownService.keep(['iframe', 'math', 'span'] as unknown as (keyof HTMLElementTagNameMap)[]);
+
+    // Add custom image rule to default empty alt to 'image'
+    turndownService.addRule('images', {
+      filter: 'img',
+      replacement: function (_content, node) {
+        const img = node as HTMLImageElement;
+        const alt = img.getAttribute('alt') || img.getAttribute('aria-label') || 'image';
+        const src = img.getAttribute('src') || '';
+        return `![${alt}](${src})`;
+      },
+    });
+
+    const doc = new DOMParser().parseFromString(selectedHtml, 'text/html');
+    const markdown = turndownService.turndown(doc as unknown as Document);
+    selectedText = normalizeCapturedMarkdown(markdown);
   }
 
   const imageAssets = uploadedAssets.filter((asset) => asset.kind === 'content-image');
@@ -874,7 +147,6 @@ export async function prepareCaptureUploads(
       mediaLocalPath,
       selectedHtml,
       selectedText,
-      contentBlocks,
       uploadedAssets,
     },
     mediaLocalPath,
@@ -996,20 +268,6 @@ function replaceMediaReference(content: string, sourceUrl: string, localPath: st
     // Ignore malformed URL fragments from page markup.
   }
   return result;
-}
-
-function replaceContentBlockMediaRefs(
-  blocks: CapturedContentBlock[] | undefined,
-  sourceUrl: string,
-  localPath: string,
-): CapturedContentBlock[] | undefined {
-  if (!blocks) {
-    return undefined;
-  }
-
-  return blocks.map((block) =>
-    block.type === 'image' && block.src === sourceUrl ? { ...block, src: localPath } : block,
-  );
 }
 
 function filenameFromUrl(url: string): string {
