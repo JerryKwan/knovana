@@ -59,6 +59,7 @@
   // DOM element bindings for auto-growing inputs
   let titleTextareaRef = $state<HTMLTextAreaElement | null>(null);
   let urlTextareaRef = $state<HTMLTextAreaElement | null>(null);
+  let storageTextareaRef = $state<HTMLTextAreaElement | null>(null);
   
   // Sidebar states
   let isSidebarCollapsed = $state(false);
@@ -150,6 +151,13 @@
     if (urlTextareaRef && editSourceUrl !== undefined) {
       urlTextareaRef.style.height = "auto";
       urlTextareaRef.style.height = urlTextareaRef.scrollHeight + "px";
+    }
+  });
+
+  $effect(() => {
+    if (storageTextareaRef && editStorageName !== undefined) {
+      storageTextareaRef.style.height = "auto";
+      storageTextareaRef.style.height = storageTextareaRef.scrollHeight + "px";
     }
   });
 
@@ -719,6 +727,15 @@
     return `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-file"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>`;
   }
 
+  function contextMenuCapture(node: HTMLElement) {
+    node.addEventListener("contextmenu", handleContextMenu, { capture: true });
+    return {
+      destroy() {
+        node.removeEventListener("contextmenu", handleContextMenu, { capture: true });
+      }
+    };
+  }
+
   onMount(async () => {
     await loadEntry();
     await loadExistingCategories();
@@ -742,9 +759,10 @@
   <!-- Top bar controls -->
   <div class="editor-top-bar">
     <div class="editor-header-title">
-      <h2>修改条目</h2>
+      <h2>编辑条目</h2>
       {#if selectedEntry}
-        <span class="file-path-badge">{selectedEntry.id}</span>
+        <span class="editor-header-divider">/</span>
+        <span class="editor-header-path" title="存储路径">{selectedEntry.id}</span>
       {/if}
     </div>
     
@@ -793,7 +811,7 @@
         <div 
           class="editor-pane" 
           class:hidden={editorView === 'preview'}
-          oncontextmenu={handleContextMenu}
+          use:contextMenuCapture
         >
           <!-- CodeMirror parent container -->
           <div bind:this={editorDiv} class="codemirror-editor-container"></div>
@@ -880,12 +898,18 @@
                 存储文件名
               </div>
               <div class="property-value">
-                <input 
-                  type="text" 
-                  class="property-input filename-input" 
+                <textarea 
+                  class="property-textarea filename-textarea" 
                   bind:value={editStorageName} 
+                  bind:this={storageTextareaRef}
                   placeholder="请输入存储文件名..." 
-                />
+                  rows="1"
+                  oninput={(e) => {
+                    const target = e.target as HTMLTextAreaElement;
+                    target.style.height = 'auto';
+                    target.style.height = target.scrollHeight + 'px';
+                  }}
+                ></textarea>
                 <div class="property-warning-box">
                   <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="warning-icon"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
                   <span class="property-warning-text">更改存储名字会物理重命名，其它条目的双链引用可能会失效。</span>
@@ -1099,21 +1123,25 @@
       class="custom-context-menu" 
       style="position: fixed; top: {contextMenu.y}px; left: {contextMenu.x}px; z-index: 10000;"
       onclick={(e) => e.stopPropagation()}
+      oncontextmenu={(e) => e.preventDefault()}
     >
       {#if contextMenu.view === 'main'}
         <button class="context-menu-item" onclick={() => { syncPreviewToLine(contextMenu.line); contextMenu.show = false; }}>
           聚焦渲染视区
         </button>
         <div class="context-menu-divider"></div>
-        <button class="context-menu-item" onclick={(e) => { contextMenu.view = 'attachments'; e.stopPropagation(); }}>
-          📎 插入附件...
+        <button class="context-menu-item has-submenu" onclick={(e) => { contextMenu.view = 'attachments'; e.stopPropagation(); }}>
+          <span>插入附件</span>
+          <svg class="submenu-chevron" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
         </button>
       {:else if contextMenu.view === 'attachments'}
         <button class="context-menu-item back-item" onclick={(e) => { contextMenu.view = 'main'; e.stopPropagation(); }}>
-          ⬅️ 返回主菜单
+          <svg class="back-chevron" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+          <span>返回主菜单</span>
         </button>
         <button class="context-menu-item upload-item" onclick={triggerRightClickUpload}>
-          ➕ 上传新文件...
+          <svg class="upload-icon" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          <span>上传新文件...</span>
         </button>
         
         {#if editAttachments.length > 0}
@@ -1126,6 +1154,7 @@
                 onclick={() => { insertAttachment(att); contextMenu.show = false; }}
                 title="插入 {att.name}"
               >
+                <span class="menu-att-icon">{@html getFileIconSvg(att.name)}</span>
                 <span class="attachment-name-text">{att.name}</span>
               </button>
             {/each}
@@ -1205,7 +1234,7 @@
   .editor-header-title {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 8px;
   }
 
   .editor-header-title h2 {
@@ -1214,14 +1243,18 @@
     margin: 0;
   }
 
-  .file-path-badge {
-    font-family: monospace;
-    font-size: 11px;
-    padding: 2px 8px;
-    background: var(--bg-paper);
-    border: 1px solid var(--border-fine);
-    border-radius: 4px;
+  .editor-header-divider {
     color: var(--text-muted);
+    font-size: 14px;
+    opacity: 0.6;
+    user-select: none;
+  }
+
+  .editor-header-path {
+    font-family: var(--font-sans), sans-serif;
+    font-size: 13px;
+    color: var(--text-muted);
+    font-weight: 500;
   }
 
   .editor-controls {
@@ -1542,9 +1575,17 @@
     border-bottom-color: var(--accent-ochre);
   }
 
-  .filename-input {
+  .filename-textarea {
     font-family: monospace;
-    font-size: 12px;
+    font-size: 13px !important;
+    font-weight: 500 !important;
+    border-bottom: 1px dashed var(--border-fine) !important;
+    overflow-y: hidden;
+    word-break: break-all;
+  }
+  .filename-textarea:focus {
+    border-bottom-style: solid !important;
+    border-bottom-color: var(--accent-ochre) !important;
   }
 
   /* Warning Box Design */
@@ -2074,5 +2115,64 @@
     white-space: nowrap;
     text-align: left;
     width: 100%;
+  }
+
+  .context-menu-item.has-submenu {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .submenu-chevron {
+    color: var(--text-muted);
+    transition: transform 0.18s ease;
+    flex-shrink: 0;
+  }
+
+  .context-menu-item:hover .submenu-chevron {
+    color: var(--accent-ochre);
+    transform: translateX(2px);
+  }
+
+  .back-chevron {
+    margin-right: 6px;
+    color: var(--text-muted);
+    transition: transform 0.18s ease;
+    flex-shrink: 0;
+  }
+
+  .context-menu-item.back-item {
+    display: flex;
+    align-items: center;
+  }
+
+  .context-menu-item.back-item:hover .back-chevron {
+    color: var(--accent-ochre);
+    transform: translateX(-2px);
+  }
+
+  .upload-icon {
+    margin-right: 6px;
+    color: var(--accent-ochre);
+    flex-shrink: 0;
+  }
+
+  .context-menu-item.upload-item {
+    display: flex;
+    align-items: center;
+  }
+
+  .menu-att-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+    margin-right: 6px;
+    flex-shrink: 0;
+  }
+
+  .context-menu-item.attachment-item {
+    display: flex;
+    align-items: center;
   }
 </style>
