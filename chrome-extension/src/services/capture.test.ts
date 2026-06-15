@@ -381,4 +381,17 @@ describe('capture service', () => {
       ),
     ).rejects.toThrow('上传媒体失败');
   });
+
+  it('converts inline styled spans to semantic formatting in selection capture', async () => {
+    const prepared = await prepareCaptureUploads(
+      'save-selection',
+      context('save-selection', {
+        selectedHtml:
+          '<p><span style="font-weight: bold;">Bold Text</span> and <span style="font-style: italic;">Italic Text</span></p>',
+        selectedImages: [],
+      }),
+    );
+
+    expect(prepared.context.selectedText).toBe('**Bold Text** and _Italic Text_');
+  });
 });

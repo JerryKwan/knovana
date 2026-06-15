@@ -110,13 +110,41 @@ export async function prepareCaptureUploads(
 
   // Convert HTML to Markdown using Turndown in the background script
   if (selectedHtml) {
+    const $ = cheerio.load(selectedHtml);
+
+    // Convert styled spans to semantic HTML elements
+    $('span').each((_, spanEl) => {
+      const style = $(spanEl).attr('style') || '';
+      const hasBold = /font-weight\s*:\s*(bold|700|800|900)/i.test(style);
+      const hasItalic = /font-style\s*:\s*italic/i.test(style);
+      const hasUnderline = /text-decoration\s*:\s*underline/i.test(style);
+
+      let innerHtml = $(spanEl).html() || '';
+
+      if (hasBold) {
+        innerHtml = `<strong>${innerHtml}</strong>`;
+      }
+      if (hasItalic) {
+        innerHtml = `<em>${innerHtml}</em>`;
+      }
+      if (hasUnderline) {
+        innerHtml = `<u>${innerHtml}</u>`;
+      }
+
+      if (hasBold || hasItalic || hasUnderline) {
+        $(spanEl).html(innerHtml);
+      }
+    });
+
+    selectedHtml = $('body').html() || selectedHtml;
+
     const turndownService = new TurndownService({
       headingStyle: 'atx',
       codeBlockStyle: 'fenced',
       hr: '---',
     });
-    // Add custom rule to prevent double escaping of common characters
-    turndownService.keep(['iframe', 'math', 'span'] as unknown as (keyof HTMLElementTagNameMap)[]);
+    // Add custom rule to prevent double escaping of common characters (removed 'span')
+    turndownService.keep(['iframe', 'math'] as unknown as (keyof HTMLElementTagNameMap)[]);
 
     // Add custom image rule to default empty alt to 'image'
     turndownService.addRule('images', {
