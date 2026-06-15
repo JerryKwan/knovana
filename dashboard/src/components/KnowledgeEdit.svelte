@@ -63,6 +63,29 @@
   // Sidebar states
   let isSidebarCollapsed = $state(false);
   let activeSidebarTab = $state<"properties" | "attachments">("properties");
+  let sidebarWidth = $state(320);
+  let isResizing = $state(false);
+
+  function handleResizeStart(e: MouseEvent) {
+    e.preventDefault();
+    isResizing = true;
+    window.addEventListener("mousemove", handleResizeMove);
+    window.addEventListener("mouseup", handleResizeEnd);
+  }
+
+  function handleResizeMove(e: MouseEvent) {
+    if (!isResizing) return;
+    const newWidth = window.innerWidth - e.clientX;
+    if (newWidth >= 260 && newWidth <= 600) {
+      sidebarWidth = newWidth;
+    }
+  }
+
+  function handleResizeEnd() {
+    isResizing = false;
+    window.removeEventListener("mousemove", handleResizeMove);
+    window.removeEventListener("mouseup", handleResizeEnd);
+  }
 
   // Helper to extract storage name from ID
   function extractStorageName(idStr: string): string {
@@ -684,6 +707,8 @@
     }
     window.removeEventListener("click", closeContextMenu);
     window.removeEventListener("contextmenu", closeContextMenu);
+    window.removeEventListener("mousemove", handleResizeMove);
+    window.removeEventListener("mouseup", handleResizeEnd);
   });
 </script>
 
@@ -765,7 +790,18 @@
       {/if}
 
       <!-- Collapsible properties sidebar (Metadata, tags & attachments upload) -->
-      <aside class="editor-props-sidebar" class:collapsed={isSidebarCollapsed}>
+      <aside 
+        class="editor-props-sidebar" 
+        class:collapsed={isSidebarCollapsed}
+        style="width: {sidebarWidth}px;"
+      >
+        <!-- Resize handle -->
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div 
+          class="sidebar-resize-handle" 
+          class:active={isResizing}
+          onmousedown={handleResizeStart}
+        ></div>
         <!-- Tabs Header -->
         <div class="sidebar-tabs">
           <button 
@@ -993,17 +1029,21 @@
               <div class="edit-attachments-list">
                 {#each editAttachments as att}
                   <div class="attachment-item-card">
-                    <div class="att-type-label">{getFileExt(att.name)}</div>
+                    <div class="att-icon-wrapper">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
+                    </div>
                     <div class="att-meta">
                       <span class="att-name" title={att.name}>{att.name}</span>
                       <span class="att-size">{formatBytes(att.size)}</span>
                     </div>
                     <div class="att-actions">
-                      <button class="att-btn" onclick={() => insertAttachment(att)} title="插入至正文">
+                      <button class="att-action-icon-btn insert" onclick={() => insertAttachment(att)} title="插入 Markdown 引用至光标处">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
                         插入
                       </button>
-                      <button class="att-btn danger" onclick={() => removeAttachment(att.name)} title="解绑附件">
-                        解绑
+                      <button class="att-action-icon-btn delete" onclick={() => removeAttachment(att.name)} title="删除附件">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+                        删除
                       </button>
                     </div>
                   </div>
@@ -1069,6 +1109,40 @@
 </div>
 
 <style>
+  /* Resize handle on the left edge of properties sidebar */
+  .sidebar-resize-handle {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 4px;
+    cursor: ew-resize;
+    z-index: 60;
+    transition: background-color 0.2s ease;
+  }
+  .sidebar-resize-handle:hover,
+  .sidebar-resize-handle.active {
+    background-color: var(--accent-ochre);
+  }
+
+  /* Keep cursor selection highlight visible when editor is unfocused */
+  .codemirror-editor-container :global(.cm-selectionBackground) {
+    background: rgba(178, 90, 56, 0.15) !important;
+  }
+  .codemirror-editor-container :global(.cm-editor.cm-focused .cm-selectionBackground) {
+    background: rgba(178, 90, 56, 0.15) !important;
+  }
+  /* Force cursor blinking visibility when editor is unfocused */
+  .codemirror-editor-container :global(.cm-editor:not(.cm-focused) .cm-cursorLayer) {
+    display: block !important;
+    visibility: visible !important;
+  }
+  .codemirror-editor-container :global(.cm-editor:not(.cm-focused) .cm-cursor) {
+    display: block !important;
+    visibility: visible !important;
+    border-left: 2px solid var(--accent-ochre) !important;
+  }
+
   .kb-editor-container {
     height: 100vh;
     display: flex;
@@ -1749,22 +1823,31 @@
   .attachment-item-card {
     background: var(--bg-paper);
     border: 1px solid var(--border-fine);
-    border-radius: 4px;
-    padding: 8px;
-    display: flex;
+    border-radius: 6px;
+    padding: 10px;
+    display: grid;
+    grid-template-columns: auto 1fr;
     align-items: center;
     gap: 8px;
     min-width: 0;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
-  .att-type-label {
-    font-size: 8.5px;
-    font-weight: 700;
-    color: var(--text-muted);
+  .attachment-item-card:hover {
+    border-color: var(--text-muted);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
+  }
+
+  .att-icon-wrapper {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
     background: var(--bg-card);
     border: 1px solid var(--border-fine);
-    padding: 4px 6px;
-    border-radius: 3px;
+    border-radius: 4px;
+    color: var(--text-muted);
     flex-shrink: 0;
   }
 
@@ -1772,56 +1855,71 @@
     display: flex;
     flex-direction: column;
     min-width: 0;
-    flex: 1;
   }
 
   .att-name {
-    font-size: 11.5px;
-    font-weight: 500;
+    font-size: 12px;
+    font-weight: 600;
     color: var(--text-ink);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
     text-align: left;
+    line-height: 1.3;
   }
 
   .att-size {
-    font-size: 10px;
+    font-size: 10.5px;
     color: var(--text-muted);
     text-align: left;
+    line-height: 1.2;
   }
 
   .att-actions {
+    grid-column: 1 / span 2;
     display: flex;
-    flex-direction: column;
-    gap: 4px;
+    gap: 6px;
+    width: 100%;
+    margin-top: 4px;
+  }
+
+  .att-action-icon-btn {
+    flex: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 6px 10px;
+    font-size: 11.5px;
+    font-weight: 600;
+    border-radius: 6px;
+    border: 1px solid var(--border-fine);
+    background: var(--bg-paper);
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    font-family: var(--font-sans), sans-serif;
+  }
+
+  .att-action-icon-btn svg {
     flex-shrink: 0;
   }
 
-  .att-btn {
-    padding: 2px 6px;
-    font-size: 10px;
-    font-weight: 600;
-    border-radius: 3px;
-    cursor: pointer;
-    background: var(--bg-card);
-    border: 1px solid var(--border-fine);
+  .att-action-icon-btn:hover {
+    background: var(--bg-card-hover);
     color: var(--text-ink);
-    font-family: var(--font-sans), sans-serif;
-    transition: all 0.15s ease;
   }
 
-  .att-btn:hover {
+  .att-action-icon-btn.insert:hover {
+    border-color: var(--accent-ochre);
+    color: var(--accent-ochre);
     background: var(--bg-card-hover);
   }
 
-  .att-btn.danger {
-    color: #b91c1c;
-    border-color: rgba(185, 28, 28, 0.15);
-  }
-
-  .att-btn.danger:hover {
-    background: #fef2f2;
+  .att-action-icon-btn.delete:hover {
+    border-color: var(--accent-terracotta);
+    color: var(--accent-terracotta);
+    background: rgba(197, 48, 48, 0.04);
   }
 
   .new-topic-input-wrapper {
