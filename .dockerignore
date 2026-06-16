@@ -1,0 +1,13 @@
+node_modules
+**/node_modules
+backend/dist
+backend/data
+backend/knowledge-base
+backend/public/dashboard
+chrome-extension/.output
+chrome-extension/.wxt
+.git
+.tmp
+.vscode
+.idea
+*.log

@@ -1,0 +1,16 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    image: knovana-backend:latest
+    container_name: knovana-backend
+    user: "node"
+    ports:
+      - "9900:8000"
+    volumes:
+      - ./data:/app/data
+      - ./knowledge-base:/app/knowledge-base
+    env_file:
+      - .env
+    restart: unless-stopped
