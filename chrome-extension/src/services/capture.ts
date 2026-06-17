@@ -63,6 +63,7 @@ export function createPendingAction(
 export async function prepareCaptureUploads(
   action: CaptureAction,
   context: ActionContext,
+  onProgress?: (status: string) => void,
 ): Promise<PreparedCaptureUploads> {
   const uploadedAssets = [...(context.uploadedAssets ?? [])];
   let mediaLocalPath = context.mediaLocalPath || '';
@@ -70,6 +71,9 @@ export async function prepareCaptureUploads(
   let selectedHtml = context.selectedHtml || '';
 
   if (action === 'save-media' && context.mediaUrl && !mediaLocalPath) {
+    if (onProgress) {
+      onProgress('正在转储主媒体文件...');
+    }
     const uploaded = await downloadAndUploadAsset(context.mediaUrl);
     const asset = toUploadedCaptureAsset('primary-media', context.mediaUrl, uploaded);
     uploadedAssets.push(asset);
@@ -77,13 +81,23 @@ export async function prepareCaptureUploads(
   }
 
   if (context.selectedImages && context.selectedImages.length > 0) {
-    const uploadedImages = await Promise.all(
-      context.selectedImages.map(async (img) => {
+    const total = context.selectedImages.length;
+    let current = 0;
+    const uploadedImages = [];
+
+    for (const img of context.selectedImages) {
+      current++;
+      if (onProgress) {
+        onProgress(`正在转储媒体附件 (${current}/${total})...`);
+      }
+      try {
         const uploaded = await downloadAndUploadAsset(img.src);
         const asset = toUploadedCaptureAsset('content-image', img.src, uploaded);
-        return { original: img.src, asset, alt: img.alt };
-      }),
-    );
+        uploadedImages.push({ original: img.src, asset, alt: img.alt });
+      } catch (err) {
+        console.warn(`Failed to process image ${img.src}:`, err);
+      }
+    }
 
     if (selectedHtml) {
       const $ = cheerio.load(selectedHtml);
@@ -228,6 +242,12 @@ export async function downloadAndUploadAsset(url: string): Promise<AttachmentUpl
     throw new Error(`下载媒体失败 (${response.status}): ${url}`);
   }
   const blob = await response.blob();
+
+  // Safeguard: skip upload for assets > 8MB
+  const MAX_UPLOAD_SIZE = 8 * 1024 * 1024; // 8MB
+  if (blob.size > MAX_UPLOAD_SIZE) {
+    throw new Error(`文件大小 ${(blob.size / 1024 / 1024).toFixed(2)}MB 超出 8MB 上传限额`);
+  }
 
   // Keep the URL filename as a hint; the backend applies the final safety and conflict rules.
   let filename = filenameFromUrl(url) || 'file';

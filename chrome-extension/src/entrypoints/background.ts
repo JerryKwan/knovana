@@ -164,14 +164,39 @@ async function handleContextMenu(
   const action = info.menuItemId as CaptureAction;
   const openedSurfacePromise = maybeOpenPreferredSurface(tab.windowId);
 
+  // Inject a loading overlay immediately
+  await chrome.scripting
+    .executeScript({
+      target: { tabId: tab.id },
+      func: injectLoadingOverlay,
+      args: [actionLabel(action)],
+    })
+    .catch(() => undefined);
+
   const snapshot = await getTabSnapshot(tab, action);
   const context = contextFromMenu(action, info, snapshot);
 
   let prepared: Awaited<ReturnType<typeof prepareCaptureUploads>>;
   try {
-    prepared = await prepareCaptureUploads(action, context);
+    prepared = await prepareCaptureUploads(action, context, (progressStatus) => {
+      void chrome.scripting
+        .executeScript({
+          target: { tabId: tab.id! },
+          func: updateLoadingOverlayText,
+          args: [progressStatus],
+        })
+        .catch(() => undefined);
+    });
   } catch (error) {
     await openedSurfacePromise;
+    // Remove loading overlay on error
+    await chrome.scripting
+      .executeScript({
+        target: { tabId: tab.id },
+        func: removeCaptureOverlay,
+      })
+      .catch(() => undefined);
+
     await chrome.scripting
       .executeScript({
         target: { tabId: tab.id },
@@ -200,6 +225,145 @@ async function handleContextMenu(
 
 function notifyCapturePreparationFailed(message: string) {
   window.alert(`Knovana 捕获失败：${message}`);
+}
+
+function injectLoadingOverlay(actionName: string): void {
+  const existing = document.getElementById('knovana-capture-overlay-host');
+  if (existing) {
+    existing.remove();
+  }
+
+  const host = document.createElement('div');
+  host.id = 'knovana-capture-overlay-host';
+  host.style.position = 'fixed';
+  host.style.zIndex = '2147483647';
+  host.style.top = '0';
+  host.style.left = '0';
+  host.style.width = '100vw';
+  host.style.height = '100vh';
+  host.style.pointerEvents = 'none';
+
+  const shadow = host.attachShadow({ mode: 'open' });
+
+  const style = document.createElement('style');
+  style.textContent = `
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    .backdrop {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(45, 41, 35, 0.4);
+      backdrop-filter: blur(4px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      transition: opacity 250ms ease;
+      pointer-events: auto;
+    }
+    .backdrop.visible {
+      opacity: 1;
+    }
+    .loading-card {
+      background: #FDFBF7;
+      border: 1px solid rgba(138, 126, 109, 0.25);
+      border-radius: 12px;
+      padding: 24px 32px;
+      box-shadow: 0 12px 32px rgba(45, 41, 35, 0.15);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 16px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      color: #3D3A35;
+      width: 320px;
+      text-align: center;
+    }
+    .spinner {
+      width: 32px;
+      height: 32px;
+      border: 3px solid rgba(197, 168, 128, 0.2);
+      border-top-color: #C5A880;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+    .status-text {
+      font-size: 14px;
+      font-weight: 500;
+      line-height: 1.4;
+    }
+    .sub-text {
+      font-size: 12px;
+      color: #8A7E6D;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+      overflow: hidden;
+      max-width: 100%;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+  `;
+  shadow.appendChild(style);
+
+  const backdrop = document.createElement('div');
+  backdrop.className = 'backdrop';
+
+  const card = document.createElement('div');
+  card.className = 'loading-card';
+
+  const spinner = document.createElement('div');
+  spinner.className = 'spinner';
+
+  const status = document.createElement('div');
+  status.id = 'status-text';
+  status.className = 'status-text';
+  status.textContent = '正在准备捕获...';
+
+  const sub = document.createElement('div');
+  sub.id = 'sub-text';
+  sub.className = 'sub-text';
+  sub.textContent = actionName;
+
+  card.appendChild(spinner);
+  card.appendChild(status);
+  card.appendChild(sub);
+  backdrop.appendChild(card);
+  shadow.appendChild(backdrop);
+  document.body.appendChild(host);
+
+  requestAnimationFrame(() => {
+    backdrop.classList.add('visible');
+  });
+}
+
+function updateLoadingOverlayText(statusText: string, subText?: string): void {
+  const host = document.getElementById('knovana-capture-overlay-host');
+  if (!host || !host.shadowRoot) return;
+
+  const statusEl = host.shadowRoot.getElementById('status-text');
+  if (statusEl) {
+    statusEl.textContent = statusText;
+  }
+  if (subText) {
+    const subEl = host.shadowRoot.getElementById('sub-text');
+    if (subEl) {
+      subEl.textContent = subText;
+    }
+  }
+}
+
+function removeCaptureOverlay(): void {
+  const host = document.getElementById('knovana-capture-overlay-host');
+  if (host) {
+    host.remove();
+  }
 }
 
 async function handleCommand(command: string): Promise<void> {

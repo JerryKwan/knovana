@@ -357,7 +357,35 @@ describe('capture service', () => {
     );
   });
 
-  it('fails capture upload preparation when a selected media upload fails', async () => {
+  it('gracefully skips media upload when a selected image fails to upload', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes('/attachments')) {
+          return new Response('nope', { status: 500, statusText: 'Server Error' });
+        }
+        return new Response('binary', {
+          status: 200,
+          headers: { 'Content-Type': 'image/jpeg' },
+        });
+      }),
+    );
+
+    const prepared = await prepareCaptureUploads(
+      'save-selection',
+      context('save-selection', {
+        selectedHtml: '<p>Look at <img src="https://example.com/broken.jpg"></p>',
+        selectedImages: [{ src: 'https://example.com/broken.jpg' }],
+      }),
+    );
+
+    // Should resolve successfully and uploadedAssets should be empty because it failed and was skipped
+    expect(prepared.uploadedAssets).toEqual([]);
+    expect(prepared.context.selectedText).toContain('https://example.com/broken.jpg');
+  });
+
+  it('fails capture upload preparation when primary media upload fails', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
@@ -374,9 +402,9 @@ describe('capture service', () => {
 
     await expect(
       prepareCaptureUploads(
-        'save-selection',
-        context('save-selection', {
-          selectedImages: [{ src: 'https://example.com/broken.jpg' }],
+        'save-media',
+        context('save-media', {
+          mediaUrl: 'https://example.com/primary.jpg',
         }),
       ),
     ).rejects.toThrow('上传媒体失败');
