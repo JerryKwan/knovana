@@ -4,6 +4,7 @@
   import { router } from "../lib/router.svelte";
   import { marked } from "marked";
   import DOMPurify from "dompurify";
+  import KLogo from "./KLogo.svelte";
   import { EditorView, basicSetup } from "codemirror";
   import { EditorState } from "@codemirror/state";
   import { markdown } from "@codemirror/lang-markdown";
@@ -806,7 +807,7 @@
 
   {#if loadingDetail}
     <div class="editor-loading">
-      <div class="spinner">✍️</div>
+      <KLogo width={48} height={48} animated={true} />
       <p>正在打开条目编辑器...</p>
     </div>
   {:else if selectedEntry}
@@ -1346,17 +1347,7 @@
     justify-content: center;
     flex: 1;
     color: var(--text-muted);
-  }
-
-  .editor-loading .spinner {
-    font-size: 36px;
-    margin-bottom: 12px;
-    animation: rotate 2s linear infinite;
-  }
-
-  @keyframes rotate {
-    from { transform: rotate(0); }
-    to { transform: rotate(360deg); }
+    gap: 16px;
   }
 
   .editor-body-layout {

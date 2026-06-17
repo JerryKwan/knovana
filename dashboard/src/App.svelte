@@ -10,6 +10,7 @@
   import Users from "./components/Users.svelte";
   import ChatWidget from "./components/ChatWidget.svelte";
   import { router } from "./lib/router.svelte";
+  import KLogo from "./components/KLogo.svelte";
 
   let loadingProfile = $state(true);
   let authenticated = $state(false);
@@ -102,7 +103,7 @@
 
 {#if loadingProfile}
   <div class="app-loading">
-    <div class="spinner">📚</div>
+    <KLogo width={64} height={64} animated={true} />
     <p>正在拉取控制台配置...</p>
   </div>
 {:else if !authenticated}
@@ -161,17 +162,7 @@
     background: var(--bg-paper);
     color: var(--text-muted);
     font-family: var(--font-sans);
-  }
-
-  .app-loading .spinner {
-    font-size: 48px;
-    animation: rotate 2s linear infinite;
-    margin-bottom: 16px;
-  }
-
-  @keyframes rotate {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
+    gap: 20px;
   }
 
   .unauthorized-state {

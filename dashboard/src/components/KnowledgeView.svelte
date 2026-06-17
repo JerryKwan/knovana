@@ -4,6 +4,7 @@
   import { router } from "../lib/router.svelte";
   import { marked } from "marked";
   import DOMPurify from "dompurify";
+  import KLogo from "./KLogo.svelte";
 
   interface Attachment {
     name: string;
@@ -277,7 +278,7 @@
 
   {#if loadingDetail}
     <div class="reader-loading">
-      <div class="spinner">📖</div>
+      <KLogo width={48} height={48} animated={true} />
       <p>正在检索条目内容...</p>
     </div>
   {:else if selectedEntry}
@@ -443,17 +444,7 @@
     justify-content: center;
     flex: 1;
     color: var(--text-muted);
-  }
-
-  .reader-loading .spinner {
-    font-size: 36px;
-    margin-bottom: 12px;
-    animation: bounce 1.5s infinite;
-  }
-
-  @keyframes bounce {
-    0%, 100% { transform: translateY(0); }
-    50% { transform: translateY(-8px); }
+    gap: 16px;
   }
 
   /* Core Layout splits */
